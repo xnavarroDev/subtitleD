@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+storage/uploads/*
+storage/audio/*
+storage/exports/*
+storage/renders/*
+storage/models/*
+!storage/**/.gitkeep

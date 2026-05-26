@@ -1,0 +1,3 @@
+# Optional future WhisperX development dependencies.
+-r requirements.txt
+whisperx==3.4.2

@@ -1,0 +1,117 @@
+x-backend-environment: &backend-environment
+  DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://subtitle:subtitle@postgres:5432/subtitled}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+  CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+  STORAGE_DIR: ${STORAGE_DIR:-/app/storage}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+  TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-faster_whisper}
+  WHISPER_MODEL_SIZE: ${WHISPER_MODEL_SIZE:-base}
+  WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+  WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+  WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-5}
+  WHISPER_VAD_FILTER: ${WHISPER_VAD_FILTER:-true}
+  WHISPER_MODEL_DIR: ${WHISPER_MODEL_DIR:-/app/storage/models}
+  TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:-mock}
+  LIBRETRANSLATE_URL: ${LIBRETRANSLATE_URL:-http://libretranslate:5000}
+  LIBRETRANSLATE_API_KEY: ${LIBRETRANSLATE_API_KEY:-}
+  TRANSLATION_TIMEOUT_SECONDS: ${TRANSLATION_TIMEOUT_SECONDS:-30}
+
+x-backend-volumes: &backend-volumes
+  - ./backend:/app
+  - ./backend/storage:/app/storage
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-subtitled}
+      POSTGRES_USER: ${POSTGRES_USER:-subtitle}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-subtitle}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-subtitle} -d ${POSTGRES_DB:-subtitled}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    environment:
+      LT_LOAD_ONLY: ${LIBRETRANSLATE_LOAD_ONLY:-en,es,fr,de,pt,it}
+      LT_UPDATE_MODELS: ${LIBRETRANSLATE_UPDATE_MODELS:-true}
+    ports:
+      - "5001:5000"
+    volumes:
+      - libretranslate-data:/home/libretranslate/.local
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/languages', timeout=5)\""]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  backend:
+    image: subtitled-backend:dev
+    build:
+      context: ./backend
+    command: flask --app run run --debug --host 0.0.0.0 --port 5000
+    environment:
+      <<: *backend-environment
+      FLASK_ENV: development
+      FLASK_DEBUG: "1"
+    ports:
+      - "5000:5000"
+    volumes: *backend-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      libretranslate:
+        condition: service_healthy
+
+  worker:
+    image: subtitled-backend:dev
+    command: celery -A celery_worker.celery_app worker --loglevel=info -P solo
+    environment: *backend-environment
+    volumes: *backend-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      libretranslate:
+        condition: service_healthy
+
+  frontend:
+    image: subtitled-frontend:dev
+    build:
+      context: ./frontend
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:5000/api}
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  postgres-data:
+  libretranslate-data:
+  frontend-node-modules:

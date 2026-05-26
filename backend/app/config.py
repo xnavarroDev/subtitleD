@@ -1,0 +1,60 @@
+import os
+from pathlib import Path
+
+
+def _bool_env(name, default):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _database_url():
+    """Return a SQLAlchemy URL with local SQLite as the non-Docker fallback."""
+    base_dir = Path(__file__).resolve().parents[1]
+    default_sqlite = f"sqlite:///{base_dir / 'storage' / 'dev.db'}"
+    url = os.getenv("DATABASE_URL", default_sqlite)
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql://", 1)
+    return url
+
+
+class Config:
+    """Runtime configuration loaded from environment variables.
+
+    Docker Compose supplies Postgres and Redis URLs by default. The local
+    fallbacks make utility tests and quick backend experiments work without the
+    full stack.
+    """
+
+    BASE_DIR = Path(__file__).resolve().parents[1]
+    STORAGE_DIR = Path(os.getenv("STORAGE_DIR", BASE_DIR / "storage"))
+
+    SQLALCHEMY_DATABASE_URI = _database_url()
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
+    CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
+
+    TRANSCRIPTION_PROVIDER = os.getenv("TRANSCRIPTION_PROVIDER", "faster_whisper")
+    WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "base")
+    WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
+    WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+    WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "5"))
+    WHISPER_VAD_FILTER = _bool_env("WHISPER_VAD_FILTER", True)
+    WHISPER_MODEL_DIR = Path(os.getenv("WHISPER_MODEL_DIR", STORAGE_DIR / "models"))
+
+    TRANSLATION_PROVIDER = os.getenv("TRANSLATION_PROVIDER", "mock")
+    LIBRETRANSLATE_URL = os.getenv("LIBRETRANSLATE_URL", "http://localhost:5001")
+    LIBRETRANSLATE_API_KEY = os.getenv("LIBRETRANSLATE_API_KEY", "")
+    TRANSLATION_TIMEOUT_SECONDS = float(os.getenv("TRANSLATION_TIMEOUT_SECONDS", "30"))
+
+    CORS_ORIGINS = [
+        origin.strip()
+        for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+        if origin.strip()
+    ]
+
+    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", str(2 * 1024 * 1024 * 1024)))
+    CREATE_TABLES = os.getenv("CREATE_TABLES", "true").lower() == "true"
