@@ -67,6 +67,13 @@ If rebuilds are slow, check that you are using `docker compose up` for normal ed
 The Compose file mounts the source code into the containers, so recompiling the full
 image on every change is usually unnecessary.
 
+## CI Pipeline
+
+GitHub Actions runs the CI workflow on pull requests and pushes to `main`.
+The workflow builds the Vite frontend, installs backend dependencies, compiles
+and tests the Flask code, validates the Docker Compose file, builds the backend
+and frontend images, and scans the repository for committed secrets.
+
 ## Deployment Status
 
 This repository is ready for local MVP development with Docker Compose, but it is
