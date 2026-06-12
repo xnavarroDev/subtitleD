@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -9,8 +10,15 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
+ARG INSTALL_WHISPERX=false
+
+COPY requirements.txt requirements-whisperx.txt ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    if [ "$INSTALL_WHISPERX" = "true" ]; then \
+        pip install -r requirements-whisperx.txt; \
+    else \
+        pip install -r requirements.txt; \
+    fi \
     # Some CTranslate2 wheels request an executable stack, which can fail under
     # Docker Desktop/WSL with "cannot enable executable stack". faster-whisper
     # does not need that flag, so clear it during image build.

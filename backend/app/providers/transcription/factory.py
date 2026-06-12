@@ -1,7 +1,6 @@
 from .base import get_setting
-from .fallback import FallbackTranscriptionProvider
 from .faster_whisper import FasterWhisperTranscriptionProvider
-from .whisperx import WhisperXTranscriptionProvider, WhisperXUnavailableError
+from .whisperx import WhisperXTranscriptionProvider
 
 
 def get_transcription_provider():
@@ -10,12 +9,7 @@ def get_transcription_provider():
     if provider in {"", "faster_whisper", "faster-whisper", "whisper"}:
         return FasterWhisperTranscriptionProvider()
     if provider in {"whisperx", "whisper-x"}:
-        return FallbackTranscriptionProvider(
-            primary=WhisperXTranscriptionProvider(),
-            fallback=FasterWhisperTranscriptionProvider(),
-            unavailable_errors=(WhisperXUnavailableError,),
-            provider_name="WhisperX",
-        )
+        return WhisperXTranscriptionProvider()
     if provider == "mock":
         raise ValueError(
             "Mock transcription is test-only. Use 'faster_whisper' or 'whisperx'."

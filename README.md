@@ -1,6 +1,6 @@
 # SubtitleD
 
-SubtitleD is an MVP subtitle translation web app. It lets you create a project, upload a video, run a background processing job that extracts audio, creates timestamped transcript segments with local faster-whisper, translates them, edit the translated subtitles, export SRT, burn subtitles into the video with FFmpeg, and download the rendered MP4.
+SubtitleD is an MVP subtitle translation web app. It lets you create a project, upload a video, run a background processing job that extracts audio, creates timestamped transcript segments with local faster-whisper or optional WhisperX, translates them, edit the translated subtitles, export SRT, burn subtitles into the video with FFmpeg, and download the rendered MP4.
 
 ## Tech Stack
 
@@ -8,7 +8,7 @@ SubtitleD is an MVP subtitle translation web app. It lets you create a project, 
 - Backend: Flask, SQLAlchemy, REST blueprints
 - Database: PostgreSQL
 - Background jobs: Celery with Redis
-- Speech-to-text: faster-whisper, with WhisperX planned as an optional future provider
+- Speech-to-text: faster-whisper, with optional WhisperX alignment and speaker diarization
 - Video processing: FFmpeg
 - Local development: Docker Compose
 
@@ -43,6 +43,14 @@ First run, or after dependency/Dockerfile changes:
 ```bash
 docker compose up --build
 ```
+
+WhisperX opt-in build:
+
+```bash
+INSTALL_WHISPERX=true TRANSCRIPTION_PROVIDER=whisperx HF_TOKEN=your-hugging-face-token docker compose up --build backend worker
+```
+
+In PowerShell, set those three environment variables with `$env:...` before running `docker compose up --build backend worker`.
 
 Normal development:
 
@@ -103,6 +111,12 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `WHISPER_BEAM_SIZE`: Whisper decode beam size
 - `WHISPER_VAD_FILTER`: Whether faster-whisper should filter nonspeech audio
 - `WHISPER_MODEL_DIR`: Persistent model download/cache directory
+- `WHISPERX_BATCH_SIZE`: WhisperX transcription batch size, default `16`
+- `WHISPERX_DIARIZE`: Whether WhisperX should run speaker diarization, default `true`
+- `HF_HOME`: Persistent Hugging Face cache directory, default `/app/storage/models/huggingface`
+- `TORCH_HOME`: Persistent PyTorch cache directory, default `/app/storage/models/torch`
+- `XDG_CACHE_HOME`: Persistent fallback cache directory, default `/app/storage/models/cache`
+- `HF_TOKEN`: Hugging Face token used by WhisperX diarization
 - `TRANSLATION_PROVIDER`: `mock` or `libretranslate`
 - `LIBRETRANSLATE_URL`: LibreTranslate API base URL, default Docker service URL
 - `LIBRETRANSLATE_API_KEY`: Optional API key for protected LibreTranslate instances
@@ -132,13 +146,14 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 The app keeps provider selection behind small interfaces so you can swap real services in without changing the REST API:
 
 - `TRANSCRIPTION_PROVIDER=faster_whisper` uses local faster-whisper speech-to-text. The first run may download the selected model into `backend/storage/models`.
-- `TRANSCRIPTION_PROVIDER=whisperx` is accepted as a future provider name, but this build logs that WhisperX is unavailable and falls back to faster-whisper.
+- `TRANSCRIPTION_PROVIDER=whisperx` uses optional WhisperX dependencies for aligned timestamps and speaker labels. Build with `INSTALL_WHISPERX=true` and set `HF_TOKEN` when `WHISPERX_DIARIZE=true`.
 - Mock translation prefixes visible language labels and applies a tiny dictionary for common demo languages.
 - `TRANSLATION_PROVIDER=libretranslate` sends subtitle text to the self-hosted LibreTranslate service for actual target-language translation.
 
 Whisper is used for transcription only. Subtitle translation is handled separately because Whisper's built-in translation mode translates speech to English rather than arbitrary target languages.
 
-WhisperX diarization is planned for a later implementation pass. Optional dependency notes live in `backend/requirements-whisperx.txt`, but the current app does not require WhisperX to run.
+WhisperX remains optional. The default backend image installs `backend/requirements.txt`; the opt-in build installs `backend/requirements-whisperx.txt`.
+Model caches are directed into `/app/storage/models`, which is bind-mounted to `backend/storage/models`, so repeated `docker compose up` and image rebuilds should not re-download the same Hugging Face, Torch, or Whisper model files. The backend Dockerfile also uses a BuildKit pip cache to speed up dependency rebuilds.
 
 ## Troubleshooting
 
@@ -153,7 +168,7 @@ docker compose up -d backend worker
 
 - No authentication or user accounts yet
 - Translation quality depends on the configured LibreTranslate language models
-- Speaker diarization is reserved for the future WhisperX provider
+- WhisperX speaker diarization requires a Hugging Face token with access to the pyannote diarization model
 - No progress percentages
 - Subtitle styling is limited to FFmpeg's default SRT rendering
 - Render quality depends on local FFmpeg support and source video codecs
@@ -162,7 +177,7 @@ docker compose up -d backend worker
 ## Future Improvements
 
 - Transcription progress and model selection controls
-- WhisperX diarization with a GPU-accelerated worker profile
+- GPU-specific WhisperX worker tuning
 - Additional translation providers
 - Subtitle styling with ASS files
 - User accounts

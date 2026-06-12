@@ -44,6 +44,9 @@ class Config:
     WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "5"))
     WHISPER_VAD_FILTER = _bool_env("WHISPER_VAD_FILTER", True)
     WHISPER_MODEL_DIR = Path(os.getenv("WHISPER_MODEL_DIR", STORAGE_DIR / "models"))
+    WHISPERX_BATCH_SIZE = int(os.getenv("WHISPERX_BATCH_SIZE", "16"))
+    WHISPERX_DIARIZE = _bool_env("WHISPERX_DIARIZE", True)
+    HF_TOKEN = os.getenv("HF_TOKEN", "")
 
     TRANSLATION_PROVIDER = os.getenv("TRANSLATION_PROVIDER", "mock")
     LIBRETRANSLATE_URL = os.getenv("LIBRETRANSLATE_URL", "http://localhost:5001")

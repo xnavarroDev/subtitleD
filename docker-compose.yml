@@ -12,6 +12,12 @@ x-backend-environment: &backend-environment
   WHISPER_BEAM_SIZE: ${WHISPER_BEAM_SIZE:-5}
   WHISPER_VAD_FILTER: ${WHISPER_VAD_FILTER:-true}
   WHISPER_MODEL_DIR: ${WHISPER_MODEL_DIR:-/app/storage/models}
+  WHISPERX_BATCH_SIZE: ${WHISPERX_BATCH_SIZE:-16}
+  WHISPERX_DIARIZE: ${WHISPERX_DIARIZE:-true}
+  HF_HOME: ${HF_HOME:-/app/storage/models/huggingface}
+  TORCH_HOME: ${TORCH_HOME:-/app/storage/models/torch}
+  XDG_CACHE_HOME: ${XDG_CACHE_HOME:-/app/storage/models/cache}
+  HF_TOKEN: ${HF_TOKEN:-}
   TRANSLATION_PROVIDER: ${TRANSLATION_PROVIDER:-mock}
   LIBRETRANSLATE_URL: ${LIBRETRANSLATE_URL:-http://libretranslate:5000}
   LIBRETRANSLATE_API_KEY: ${LIBRETRANSLATE_API_KEY:-}
@@ -67,6 +73,8 @@ services:
     image: subtitled-backend:dev
     build:
       context: ./backend
+      args:
+        INSTALL_WHISPERX: ${INSTALL_WHISPERX:-false}
     command: flask --app run run --debug --host 0.0.0.0 --port 5000
     environment:
       <<: *backend-environment
