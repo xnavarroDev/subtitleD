@@ -10,18 +10,12 @@ RUN apt-get update \
 
 WORKDIR /app
 
-ARG INSTALL_WHISPERX=false
-
-COPY requirements.txt requirements-whisperx.txt ./
+COPY requirements.txt ./
+# Some CTranslate2 wheels request an executable stack, which can fail under
+# Docker Desktop/WSL with "cannot enable executable stack". WhisperX does
+# not need that flag, so clear it during image build.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    if [ "$INSTALL_WHISPERX" = "true" ]; then \
-        pip install -r requirements-whisperx.txt; \
-    else \
-        pip install -r requirements.txt; \
-    fi \
-    # Some CTranslate2 wheels request an executable stack, which can fail under
-    # Docker Desktop/WSL with "cannot enable executable stack". faster-whisper
-    # does not need that flag, so clear it during image build.
+    pip install -r requirements.txt \
     && find /usr/local/lib/python3.12/site-packages -name "libctranslate2*.so*" \
         -exec patchelf --clear-execstack {} \;
 

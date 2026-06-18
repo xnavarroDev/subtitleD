@@ -214,8 +214,8 @@ def _load_whisperx_module():
         import whisperx
     except ImportError as exc:
         raise WhisperXUnavailableError(
-            "WhisperX is not installed. Install backend/requirements-whisperx.txt "
-            "or rebuild the backend image with INSTALL_WHISPERX=true."
+            "WhisperX is not installed. Install backend/requirements.txt "
+            "or rebuild the backend image."
         ) from exc
     return whisperx
 
@@ -226,8 +226,7 @@ def _load_diarization_pipeline_class():
     except ImportError as exc:
         raise WhisperXUnavailableError(
             "WhisperX diarization dependencies are not installed. Install "
-            "backend/requirements-whisperx.txt or rebuild the backend image with "
-            "INSTALL_WHISPERX=true."
+            "backend/requirements.txt or rebuild the backend image."
         ) from exc
     return DiarizationPipeline
 

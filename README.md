@@ -1,6 +1,6 @@
 # SubtitleD
 
-SubtitleD is an MVP subtitle translation web app. It lets you create a project, upload a video, run a background processing job that extracts audio, creates timestamped transcript segments with local faster-whisper or optional WhisperX, translates them, edit the translated subtitles, export SRT, burn subtitles into the video with FFmpeg, and download the rendered MP4.
+SubtitleD is an MVP subtitle translation web app. It lets you create a project, upload a video, run a background processing job that extracts audio, creates aligned WhisperX transcript segments, translates them, edit the translated subtitles, export SRT, burn subtitles into the video with FFmpeg, and download the rendered MP4.
 
 ## Tech Stack
 
@@ -8,7 +8,7 @@ SubtitleD is an MVP subtitle translation web app. It lets you create a project, 
 - Backend: Flask, SQLAlchemy, REST blueprints
 - Database: PostgreSQL
 - Background jobs: Celery with Redis
-- Speech-to-text: faster-whisper, with optional WhisperX alignment and speaker diarization
+- Speech-to-text: WhisperX with alignment and optional speaker diarization
 - Video processing: FFmpeg
 - Local development: Docker Compose
 
@@ -44,13 +44,38 @@ First run, or after dependency/Dockerfile changes:
 docker compose up --build
 ```
 
-WhisperX opt-in build:
+WhisperX is installed by default. If speaker diarization is enabled, set `HF_TOKEN`
+before starting the backend and worker:
 
 ```bash
-INSTALL_WHISPERX=true TRANSCRIPTION_PROVIDER=whisperx HF_TOKEN=your-hugging-face-token docker compose up --build backend worker
+HF_TOKEN=your-hugging-face-token docker compose up --build backend worker
 ```
 
-In PowerShell, set those three environment variables with `$env:...` before running `docker compose up --build backend worker`.
+In PowerShell, set that environment variable with `$env:HF_TOKEN=...` before running `docker compose up --build backend worker`.
+
+### Hugging Face Token For Diarization
+
+Speaker diarization uses gated pyannote models from Hugging Face. When
+`WHISPERX_DIARIZE=true`, which is the default, `HF_TOKEN` must be a Hugging Face
+User Access Token with read access. A standard `read` token is enough for local
+development; a fine-grained token also works if it can read the required pyannote
+model repositories. A `write` token is not needed.
+
+Before starting the worker, use the same Hugging Face account to accept the user
+conditions for both required model repositories:
+
+- [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
+- [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
+
+Then add the token to `.env`:
+
+```bash
+HF_TOKEN=hf_your_read_token_here
+```
+
+If you do not need speaker labels, set `WHISPERX_DIARIZE=false` and leave
+`HF_TOKEN` empty. WhisperX transcription and timestamp alignment can still run
+without the token; diarization is the part that needs gated model access.
 
 Normal development:
 
@@ -104,19 +129,16 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `STORAGE_DIR`: Backend storage directory
 - `CORS_ORIGINS`: Comma-separated frontend origins allowed by Flask
 - `VITE_API_BASE_URL`: Frontend API base URL
-- `TRANSCRIPTION_PROVIDER`: `faster_whisper` or `whisperx`; `whisperx` currently falls back to faster-whisper
-- `WHISPER_MODEL_SIZE`: Local faster-whisper model, such as `tiny`, `base`, or `small`
+- `WHISPER_MODEL_SIZE`: WhisperX model size, such as `tiny`, `base`, or `small`
 - `WHISPER_DEVICE`: Whisper runtime device, default `cpu`
 - `WHISPER_COMPUTE_TYPE`: Whisper compute type, default `int8`
-- `WHISPER_BEAM_SIZE`: Whisper decode beam size
-- `WHISPER_VAD_FILTER`: Whether faster-whisper should filter nonspeech audio
 - `WHISPER_MODEL_DIR`: Persistent model download/cache directory
 - `WHISPERX_BATCH_SIZE`: WhisperX transcription batch size, default `16`
 - `WHISPERX_DIARIZE`: Whether WhisperX should run speaker diarization, default `true`
 - `HF_HOME`: Persistent Hugging Face cache directory, default `/app/storage/models/huggingface`
 - `TORCH_HOME`: Persistent PyTorch cache directory, default `/app/storage/models/torch`
-- `XDG_CACHE_HOME`: Persistent fallback cache directory, default `/app/storage/models/cache`
-- `HF_TOKEN`: Hugging Face token used by WhisperX diarization
+- `XDG_CACHE_HOME`: Persistent cache directory, default `/app/storage/models/cache`
+- `HF_TOKEN`: Hugging Face `read` token used by WhisperX diarization; the token account must have accepted the pyannote model conditions
 - `TRANSLATION_PROVIDER`: `mock` or `libretranslate`
 - `LIBRETRANSLATE_URL`: LibreTranslate API base URL, default Docker service URL
 - `LIBRETRANSLATE_API_KEY`: Optional API key for protected LibreTranslate instances
@@ -143,21 +165,21 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 
 ## Development Notes
 
-The app keeps provider selection behind small interfaces so you can swap real services in without changing the REST API:
+The app keeps transcription and translation behind small interfaces so provider internals can evolve without changing the REST API:
 
-- `TRANSCRIPTION_PROVIDER=faster_whisper` uses local faster-whisper speech-to-text. The first run may download the selected model into `backend/storage/models`.
-- `TRANSCRIPTION_PROVIDER=whisperx` uses optional WhisperX dependencies for aligned timestamps and speaker labels. Build with `INSTALL_WHISPERX=true` and set `HF_TOKEN` when `WHISPERX_DIARIZE=true`.
+- Transcription uses WhisperX for aligned timestamps and speaker labels. The first run may download the selected model into `backend/storage/models`.
+- Set `HF_TOKEN` to a Hugging Face read token when `WHISPERX_DIARIZE=true`, which is the default.
 - Mock translation prefixes visible language labels and applies a tiny dictionary for common demo languages.
 - `TRANSLATION_PROVIDER=libretranslate` sends subtitle text to the self-hosted LibreTranslate service for actual target-language translation.
 
 Whisper is used for transcription only. Subtitle translation is handled separately because Whisper's built-in translation mode translates speech to English rather than arbitrary target languages.
 
-WhisperX remains optional. The default backend image installs `backend/requirements.txt`; the opt-in build installs `backend/requirements-whisperx.txt`.
+WhisperX is required for transcription and is installed by the default backend image from `backend/requirements.txt`.
 Model caches are directed into `/app/storage/models`, which is bind-mounted to `backend/storage/models`, so repeated `docker compose up` and image rebuilds should not re-download the same Hugging Face, Torch, or Whisper model files. The backend Dockerfile also uses a BuildKit pip cache to speed up dependency rebuilds.
 
 ## Troubleshooting
 
-If faster-whisper fails with an error like `libctranslate2... cannot enable executable stack`, rebuild the backend and worker images. The Dockerfile clears that native library flag during image build:
+If a transcription dependency fails with an error like `libctranslate2... cannot enable executable stack`, rebuild the backend and worker images. The Dockerfile clears that native library flag during image build:
 
 ```bash
 docker compose build backend

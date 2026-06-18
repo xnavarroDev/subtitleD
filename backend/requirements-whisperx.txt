@@ -1,9 +1,0 @@
-# Optional future WhisperX development dependencies.
--r requirements.txt
-# WhisperX 3.4.2 expects pyannote's pre-4.x use_auth_token API, and
-# pyannote 3.3.x expects the TorchAudio 2.5 metadata API.
-torch==2.5.1
-torchaudio==2.5.1
-pyannote.audio==3.3.2
-matplotlib==3.10.9
-whisperx==3.4.2
