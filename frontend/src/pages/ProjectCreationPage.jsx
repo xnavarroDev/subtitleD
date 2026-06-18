@@ -10,6 +10,8 @@ export default function ProjectCreationPage() {
   const [title, setTitle] = useState("");
   const [sourceLanguage, setSourceLanguage] = useState("English");
   const [targetLanguage, setTargetLanguage] = useState("Spanish");
+  const [minSpeakers, setMinSpeakers] = useState("");
+  const [maxSpeakers, setMaxSpeakers] = useState("");
   const [videoFile, setVideoFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -28,11 +30,19 @@ export default function ProjectCreationPage() {
     setSubmitting(true);
     setError(null);
     try {
-      const project = await createProject({
+      const payload = {
         title,
         source_language: sourceLanguage,
         target_language: targetLanguage
-      });
+      };
+      if (minSpeakers.trim()) {
+        payload.min_speakers = Number(minSpeakers);
+      }
+      if (maxSpeakers.trim()) {
+        payload.max_speakers = Number(maxSpeakers);
+      }
+
+      const project = await createProject(payload);
       await uploadProjectVideo(project.id, videoFile);
       navigate(`/projects/${project.id}`);
     } catch (caught) {
@@ -92,6 +102,29 @@ export default function ProjectCreationPage() {
               required
             />
           </label>
+
+          <div className="form-row">
+            <label>
+              <span>Minimum speakers</span>
+              <input
+                min="1"
+                type="number"
+                value={minSpeakers}
+                onChange={(event) => setMinSpeakers(event.target.value)}
+                placeholder="Optional"
+              />
+            </label>
+            <label>
+              <span>Maximum speakers</span>
+              <input
+                min="1"
+                type="number"
+                value={maxSpeakers}
+                onChange={(event) => setMaxSpeakers(event.target.value)}
+                placeholder="Optional"
+              />
+            </label>
+          </div>
 
           {error ? <div className="notice error">{error}</div> : null}
 

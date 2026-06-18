@@ -7,7 +7,6 @@ from app.models import Project, ProjectStatus, SubtitleSegment
 
 class TestConfig:
     TESTING = True
-    STORAGE_DIR = "backend/storage"
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     CELERY_BROKER_URL = "memory://"
@@ -17,8 +16,11 @@ class TestConfig:
 
 
 @pytest.fixture()
-def app():
-    app = create_app(TestConfig)
+def app(tmp_path):
+    class TestConfigWithStorage(TestConfig):
+        STORAGE_DIR = tmp_path / "storage"
+
+    app = create_app(TestConfigWithStorage)
     with app.app_context():
         yield app
         db.session.remove()
