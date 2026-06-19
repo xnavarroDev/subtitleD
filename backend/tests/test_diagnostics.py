@@ -64,6 +64,82 @@ def test_diagnostic_report_is_unavailable_when_any_check_fails():
     assert report.to_dict()["checks"][1]["name"] == "worker"
 
 
+def test_diagnostic_report_can_hide_internal_details():
+    report = DiagnosticReport(
+        mode="quick",
+        checks=(
+            DiagnosticCheck(
+                "worker",
+                "pass",
+                "ready",
+                {"workers": ["celery@internal-host"]},
+            ),
+        ),
+    )
+
+    payload = report.to_dict(include_details=False)
+
+    assert "details" not in payload["checks"][0]
+
+
+def test_worker_check_uses_redis_heartbeat_without_control_ping(app, monkeypatch):
+    class FakeRedis:
+        def scan_iter(self, match, count):
+            assert match == "subtitled:workers:heartbeat:*"
+            assert count == 100
+            return iter([b"subtitled:workers:heartbeat:worker-1"])
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        diagnostics_module.Redis,
+        "from_url",
+        lambda *args, **kwargs: FakeRedis(),
+    )
+
+    def unexpected_ping(**_kwargs):
+        raise AssertionError("control ping should not run when a heartbeat exists")
+
+    monkeypatch.setattr(
+        diagnostics_module.celery_app.control,
+        "ping",
+        unexpected_ping,
+    )
+
+    with app.app_context():
+        result = diagnostics_module.check_worker()
+
+    assert result.status == "pass"
+    assert result.details == {"source": "heartbeat", "worker_count": 1}
+
+
+def test_worker_check_falls_back_to_control_ping(app, monkeypatch):
+    class FakeRedis:
+        def scan_iter(self, match, count):
+            return iter([])
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        diagnostics_module.Redis,
+        "from_url",
+        lambda *args, **kwargs: FakeRedis(),
+    )
+    monkeypatch.setattr(
+        diagnostics_module.celery_app.control,
+        "ping",
+        lambda timeout: [{"celery@test-worker": {"ok": "pong"}}],
+    )
+
+    with app.app_context():
+        result = diagnostics_module.check_worker()
+
+    assert result.status == "pass"
+    assert result.details["source"] == "control_ping"
+
+
 def test_storage_check_confirms_required_directories_are_writable(app):
     with app.app_context():
         result = check_storage()
@@ -100,6 +176,7 @@ def test_diagnostics_endpoint_returns_report_and_status(client, monkeypatch):
     assert response.status_code == 503
     assert response.json["status"] == "unavailable"
     assert response.json["mode"] == "deep"
+    assert "details" not in response.json["checks"][0]
     assert calls == [(True, True)]
 
 

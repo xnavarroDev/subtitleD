@@ -1,0 +1,81 @@
+name: Deep runtime diagnostics
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deep-runtime-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  whisperx-model-load:
+    name: WhisperX model-load smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      TRANSLATION_PROVIDER: mock
+      WHISPERX_DIARIZE: "true"
+      WORKER_PING_TIMEOUT_SECONDS: "2"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check whether HF_TOKEN is configured
+        id: huggingface
+        shell: bash
+        run: |
+          if [ -n "$HF_TOKEN" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping deep diagnostics because the HF_TOKEN repository secret is not configured."
+          fi
+
+      - name: Build backend image
+        if: steps.huggingface.outputs.available == 'true'
+        run: docker compose build backend
+
+      - name: Start database and Redis
+        if: steps.huggingface.outputs.available == 'true'
+        run: docker compose up -d --wait postgres redis
+
+      - name: Start worker
+        if: steps.huggingface.outputs.available == 'true'
+        run: >-
+          docker compose run -d --no-deps
+          --name subtitled-deep-worker worker
+
+      - name: Wait for worker heartbeat
+        if: steps.huggingface.outputs.available == 'true'
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            if docker compose exec -T redis redis-cli --scan \
+              --pattern 'subtitled:workers:heartbeat:*' | grep --quiet .; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Run full model-load diagnostics
+        if: steps.huggingface.outputs.available == 'true'
+        run: >-
+          docker compose run --rm --no-deps backend
+          flask --app run diagnostics --load-models --json-output
+
+      - name: Show worker logs on failure
+        if: failure() && steps.huggingface.outputs.available == 'true'
+        run: docker logs subtitled-deep-worker || true
+
+      - name: Stop deep diagnostics stack
+        if: always() && steps.huggingface.outputs.available == 'true'
+        run: |
+          docker rm --force subtitled-deep-worker || true
+          docker compose down --volumes --remove-orphans

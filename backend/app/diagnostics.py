@@ -36,13 +36,13 @@ class DiagnosticCheck:
     def ready(self):
         return self.status != FAIL
 
-    def to_dict(self):
+    def to_dict(self, include_details=True):
         data = {
             "name": self.name,
             "status": self.status,
             "message": self.message,
         }
-        if self.details:
+        if include_details and self.details:
             data["details"] = self.details
         return data
 
@@ -64,14 +64,16 @@ class DiagnosticReport:
     def status(self):
         return "ready" if self.ready else "unavailable"
 
-    def to_dict(self):
+    def to_dict(self, include_details=True):
         return {
             "status": self.status,
             "ready": self.ready,
             "mode": self.mode,
             "cached": self.cached,
             "checked_at": self.checked_at,
-            "checks": [check.to_dict() for check in self.checks],
+            "checks": [
+                check.to_dict(include_details=include_details) for check in self.checks
+            ],
         }
 
 
@@ -205,6 +207,37 @@ def check_redis():
 
 def check_worker():
     timeout = float(current_app.config.get("WORKER_PING_TIMEOUT_SECONDS", 2))
+    key_prefix = current_app.config.get(
+        "WORKER_HEARTBEAT_KEY_PREFIX",
+        "subtitled:workers:heartbeat:",
+    )
+    client = None
+    try:
+        client = Redis.from_url(
+            current_app.config["CELERY_BROKER_URL"],
+            socket_connect_timeout=timeout,
+            socket_timeout=timeout,
+        )
+        heartbeat_keys = list(client.scan_iter(match=f"{key_prefix}*", count=100))
+    except Exception:
+        heartbeat_keys = []
+    finally:
+        if client:
+            client.close()
+
+    if heartbeat_keys:
+        return DiagnosticCheck(
+            "worker",
+            PASS,
+            "Celery worker is ready.",
+            {
+                "source": "heartbeat",
+                "worker_count": len(heartbeat_keys),
+            },
+        )
+
+    # The control ping covers the short startup window before the first
+    # heartbeat is published and workers that predate heartbeat support.
     try:
         replies = celery_app.control.ping(timeout=timeout)
     except Exception:
@@ -231,7 +264,7 @@ def check_worker():
         "worker",
         PASS,
         "Celery worker is ready.",
-        {"workers": nodes},
+        {"source": "control_ping", "workers": nodes},
     )
 
 

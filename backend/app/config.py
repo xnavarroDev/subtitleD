@@ -55,6 +55,16 @@ class Config:
         os.getenv("DIAGNOSTICS_DEEP_CACHE_TTL_SECONDS", "300")
     )
     WORKER_PING_TIMEOUT_SECONDS = float(os.getenv("WORKER_PING_TIMEOUT_SECONDS", "2"))
+    WORKER_HEARTBEAT_INTERVAL_SECONDS = float(
+        os.getenv("WORKER_HEARTBEAT_INTERVAL_SECONDS", "5")
+    )
+    WORKER_HEARTBEAT_TTL_SECONDS = int(
+        os.getenv("WORKER_HEARTBEAT_TTL_SECONDS", "15")
+    )
+    WORKER_HEARTBEAT_KEY_PREFIX = os.getenv(
+        "WORKER_HEARTBEAT_KEY_PREFIX",
+        "subtitled:workers:heartbeat:",
+    )
     MIN_FREE_STORAGE_BYTES = int(
         os.getenv("MIN_FREE_STORAGE_BYTES", str(1024 * 1024 * 1024))
     )

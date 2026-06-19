@@ -62,7 +62,7 @@ def diagnostics():
     deep = _parse_bool_query(request.args.get("deep"))
     refresh = _parse_bool_query(request.args.get("refresh"))
     report = run_system_diagnostics(deep=deep, refresh=refresh)
-    return jsonify(report.to_dict()), 200 if report.ready else 503
+    return jsonify(report.to_dict(include_details=False)), 200 if report.ready else 503
 
 
 @api_bp.get("/projects/<project_id>")
@@ -105,7 +105,12 @@ def process_project(project_id):
         require_job_preflight("process", project)
     except PreflightError as exc:
         return (
-            jsonify({"error": str(exc), "diagnostics": exc.report.to_dict()}),
+            jsonify(
+                {
+                    "error": str(exc),
+                    "diagnostics": exc.report.to_dict(include_details=False),
+                }
+            ),
             503,
         )
 
@@ -194,7 +199,12 @@ def render_project(project_id):
         require_job_preflight("render", project)
     except PreflightError as exc:
         return (
-            jsonify({"error": str(exc), "diagnostics": exc.report.to_dict()}),
+            jsonify(
+                {
+                    "error": str(exc),
+                    "diagnostics": exc.report.to_dict(include_details=False),
+                }
+            ),
             503,
         )
 

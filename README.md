@@ -105,8 +105,13 @@ image on every change is usually unnecessary.
 
 GitHub Actions runs the CI workflow on pull requests and pushes to `main`.
 The workflow builds the Vite frontend, installs backend dependencies, compiles
-and tests the Flask code, validates the Docker Compose file, builds the backend
-and frontend images, and scans the repository for committed secrets.
+and tests the Flask code, runs `pip check`, validates the Docker Compose file,
+builds the backend and frontend images, verifies live diagnostics with and
+without a worker, and scans the repository for committed secrets.
+
+A separate weekly/manual deep diagnostics workflow loads the WhisperX and
+pyannote models using the `HF_TOKEN` repository secret. It skips cleanly when
+that secret is not configured and does not run on every pull request.
 
 ## Deployment Status
 
@@ -149,6 +154,9 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `DIAGNOSTICS_TIMEOUT_SECONDS`: Timeout for Redis and FFmpeg readiness checks, default `2`
 - `DIAGNOSTICS_DEEP_CACHE_TTL_SECONDS`: Seconds to reuse a deep diagnostic report, default `300`
 - `WORKER_PING_TIMEOUT_SECONDS`: Timeout for the Celery worker readiness ping, default `2`
+- `WORKER_HEARTBEAT_INTERVAL_SECONDS`: Seconds between worker heartbeat updates, default `5`
+- `WORKER_HEARTBEAT_TTL_SECONDS`: Seconds before a missing heartbeat marks a worker unavailable, default `15`
+- `WORKER_HEARTBEAT_KEY_PREFIX`: Redis key prefix for worker heartbeat records
 - `MIN_FREE_STORAGE_BYTES`: Free-space threshold that produces a storage warning, default `1073741824`
 
 ## Runtime Diagnostics
@@ -157,7 +165,7 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 storage, FFmpeg, WhisperX configuration, and the selected translation provider.
 It returns HTTP `200` when ready and `503` when a required subsystem fails.
 
-Use `deep=true` to load WhisperX models and validate gated diarization access.
+Use `deep=true` to validate WhisperX package compatibility and gated diarization access.
 The expensive deep transcription result is cached briefly while database,
 worker, storage, FFmpeg, and translation checks are rerun on every request.
 Add `refresh=true` to force a fresh provider result:
@@ -184,6 +192,14 @@ queueing. They return HTTP `503` with a structured `diagnostics` report when a
 required provider, file, worker, storage path, or native dependency is not ready.
 Workers repeat the same checks before doing expensive work to catch environment
 drift between the API and worker containers.
+
+The public diagnostics API returns statuses and actionable messages without
+exposing worker hostnames, package versions, exact disk capacity, or language
+inventories. The CLI JSON output retains those details for local operators.
+
+Worker readiness uses a Redis heartbeat published from a background thread, so a
+`solo` Celery worker remains visible while it is busy with a long WhisperX task.
+Celery control ping remains as a startup and backward-compatibility fallback.
 
 ## API Endpoints
 
