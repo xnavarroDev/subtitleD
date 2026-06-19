@@ -6,6 +6,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
 
 from .config import Config
+from .diagnostics import register_diagnostics_cli
 from .extensions import db, init_celery
 from .utils.files import ensure_storage_dirs
 
@@ -30,6 +31,7 @@ def create_app(config_object=Config):
     from .routes import api_bp
 
     app.register_blueprint(api_bp)
+    register_diagnostics_cli(app)
 
     @app.get("/health")
     def health():

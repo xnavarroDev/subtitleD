@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from flask import current_app
 
+from .diagnostics import require_job_preflight
 from .extensions import celery_app, db
 from .models import Project, ProjectStatus, SubtitleSegment
 from .providers import get_transcription_provider, get_translation_provider
@@ -18,6 +19,7 @@ def process_video_task(project_id):
         return {"error": "Project not found"}
 
     try:
+        require_job_preflight("process", project, include_worker=False)
         project.status = ProjectStatus.PROCESSING
         project.error_message = None
         db.session.commit()
@@ -78,6 +80,7 @@ def render_video_task(project_id):
         return {"error": "Project not found"}
 
     try:
+        require_job_preflight("render", project, include_worker=False)
         project.status = ProjectStatus.RENDERING
         project.error_message = None
         db.session.commit()

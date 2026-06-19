@@ -95,6 +95,43 @@ def test_libretranslate_provider_posts_translation_request(monkeypatch):
     }
 
 
+def test_libretranslate_readiness_checks_required_languages(monkeypatch):
+    def fake_urlopen(request, timeout):
+        assert request.full_url == "http://translator:5000/languages"
+        assert timeout == 5
+        return FakeResponse(
+            [
+                {"code": "en", "name": "English"},
+                {"code": "es", "name": "Spanish"},
+            ]
+        )
+
+    monkeypatch.setattr(translation, "urlopen", fake_urlopen)
+    provider = LibreTranslateProvider(
+        base_url="http://translator:5000",
+        timeout_seconds=30,
+    )
+
+    result = provider.check_ready("English", "Spanish")
+
+    assert result.status == "pass"
+    assert result.details["available_languages"] == ["en", "es"]
+
+
+def test_libretranslate_readiness_rejects_missing_target_language(monkeypatch):
+    monkeypatch.setattr(
+        translation,
+        "urlopen",
+        lambda request, timeout: FakeResponse([{"code": "en", "name": "English"}]),
+    )
+    provider = LibreTranslateProvider(base_url="http://translator:5000")
+
+    result = provider.check_ready("English", "Spanish")
+
+    assert result.status == "fail"
+    assert "es" in result.message
+
+
 def test_libretranslate_provider_uses_auto_for_unknown_source(monkeypatch):
     requests = []
 

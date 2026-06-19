@@ -30,6 +30,7 @@ SubtitleD is an MVP subtitle translation web app. It lets you create a project, 
 
    - Frontend: http://localhost:5173
    - Backend health check: http://localhost:5000/health
+   - Runtime diagnostics: http://localhost:5000/api/diagnostics
 
 The backend automatically creates development tables on startup. Uploaded and generated files are stored under `backend/storage`.
 
@@ -145,9 +146,48 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `LIBRETRANSLATE_LOAD_ONLY`: Comma-separated LibreTranslate languages to install/load, defaulting to common MVP targets including Japanese
 - `LIBRETRANSLATE_UPDATE_MODELS`: Whether LibreTranslate should download missing models
 - `TRANSLATION_TIMEOUT_SECONDS`: Translation API timeout
+- `DIAGNOSTICS_TIMEOUT_SECONDS`: Timeout for Redis and FFmpeg readiness checks, default `2`
+- `DIAGNOSTICS_DEEP_CACHE_TTL_SECONDS`: Seconds to reuse a deep diagnostic report, default `300`
+- `WORKER_PING_TIMEOUT_SECONDS`: Timeout for the Celery worker readiness ping, default `2`
+- `MIN_FREE_STORAGE_BYTES`: Free-space threshold that produces a storage warning, default `1073741824`
+
+## Runtime Diagnostics
+
+`GET /api/diagnostics` runs quick checks for the database, Redis, Celery worker,
+storage, FFmpeg, WhisperX configuration, and the selected translation provider.
+It returns HTTP `200` when ready and `503` when a required subsystem fails.
+
+Use `deep=true` to load WhisperX models and validate gated diarization access.
+The expensive deep transcription result is cached briefly while database,
+worker, storage, FFmpeg, and translation checks are rerun on every request.
+Add `refresh=true` to force a fresh provider result:
+
+```text
+GET /api/diagnostics?deep=true&refresh=true
+```
+
+The same checks are available from Docker through the Flask CLI:
+
+```bash
+docker compose run --rm backend flask --app run diagnostics
+docker compose run --rm backend flask --app run diagnostics --deep --refresh
+docker compose run --rm backend flask --app run diagnostics --load-models
+docker compose run --rm backend flask --app run diagnostics --json-output
+```
+
+The API deep check validates package compatibility and remote model access without
+loading large models into the Flask web process. Use the CLI-only `--load-models`
+option for full model initialization in an isolated container process.
+
+Processing and rendering endpoints run cheap job-specific preflights before
+queueing. They return HTTP `503` with a structured `diagnostics` report when a
+required provider, file, worker, storage path, or native dependency is not ready.
+Workers repeat the same checks before doing expensive work to catch environment
+drift between the API and worker containers.
 
 ## API Endpoints
 
+- `GET /api/diagnostics`: Check runtime subsystem readiness; supports `deep` and `refresh`
 - `POST /api/projects`: Create a project
 - `GET /api/projects`: List projects
 - `GET /api/projects/<project_id>`: Get project metadata

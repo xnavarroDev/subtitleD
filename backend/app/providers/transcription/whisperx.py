@@ -1,5 +1,8 @@
+import importlib.metadata
+import tempfile
 from pathlib import Path
 
+from ...diagnostics import DiagnosticCheck, FAIL, PASS
 from .base import (
     BaseTranscriptionProvider,
     TranscriptSegment,
@@ -52,6 +55,98 @@ class WhisperXTranscriptionProvider(BaseTranscriptionProvider):
         self.whisperx_module = whisperx_module
         self.diarization_pipeline_class = diarization_pipeline_class
         self._diarization_model = None
+
+    def check_ready(self, deep=False, load_models=False):
+        """Validate WhisperX configuration and optionally load provider models."""
+        try:
+            whisperx = self._get_whisperx_module()
+            import matplotlib.pyplot  # noqa: F401
+            import pyannote.audio  # noqa: F401
+            import torch
+            import torchaudio
+        except Exception as exc:
+            return DiagnosticCheck(
+                "transcription",
+                FAIL,
+                f"WhisperX dependency import failed: {exc}",
+            )
+
+        if not hasattr(torchaudio, "AudioMetaData"):
+            return DiagnosticCheck(
+                "transcription",
+                FAIL,
+                "Installed TorchAudio is incompatible with pyannote.audio.",
+            )
+        if self.device.startswith("cuda") and not torch.cuda.is_available():
+            return DiagnosticCheck(
+                "transcription",
+                FAIL,
+                f"WhisperX is configured for {self.device}, but CUDA is unavailable.",
+            )
+        if self.diarize and not self.hf_token:
+            return DiagnosticCheck(
+                "transcription",
+                FAIL,
+                "WhisperX diarization requires HF_TOKEN.",
+            )
+
+        try:
+            self.model_dir.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=self.model_dir):
+                pass
+        except OSError:
+            return DiagnosticCheck(
+                "transcription",
+                FAIL,
+                "WhisperX model directory is not writable.",
+            )
+
+        if deep and self.diarize:
+            try:
+                _patch_hf_hub_use_auth_token_alias()
+                _verify_pyannote_model_access(self.hf_token)
+            except Exception as exc:
+                return DiagnosticCheck(
+                    "transcription",
+                    FAIL,
+                    f"WhisperX deep readiness check failed: {exc}",
+                )
+
+        if load_models:
+            try:
+                self._get_model(whisperx, None)
+                if self.diarize:
+                    self._get_diarization_model()
+            except Exception as exc:
+                return DiagnosticCheck(
+                    "transcription",
+                    FAIL,
+                    f"WhisperX model-load check failed: {exc}",
+                )
+
+        versions = {}
+        for package in ("whisperx", "torch", "torchaudio", "pyannote.audio"):
+            try:
+                versions[package] = importlib.metadata.version(package)
+            except importlib.metadata.PackageNotFoundError:
+                versions[package] = "unknown"
+        if load_models:
+            message = "WhisperX models and diarization loaded successfully."
+        elif deep and self.diarize:
+            message = "WhisperX dependencies and gated model access are ready."
+        else:
+            message = "WhisperX configuration and dependencies are ready."
+        return DiagnosticCheck(
+            "transcription",
+            PASS,
+            message,
+            {
+                "device": self.device,
+                "model_size": self.model_size,
+                "diarization": self.diarize,
+                "versions": versions,
+            },
+        )
 
     def transcribe(self, audio_path, source_language, min_speakers=None, max_speakers=None):
         """Transcribe, align, and optionally diarize an audio file."""
@@ -158,7 +253,9 @@ class WhisperXTranscriptionProvider(BaseTranscriptionProvider):
     def _get_diarization_model(self):
         if self._diarization_model is None:
             use_real_pipeline = self.diarization_pipeline_class is None
-            pipeline_class = self.diarization_pipeline_class or _load_diarization_pipeline_class()
+            pipeline_class = (
+                self.diarization_pipeline_class or _load_diarization_pipeline_class()
+            )
             _patch_hf_hub_use_auth_token_alias()
             if use_real_pipeline:
                 _verify_pyannote_model_access(self.hf_token)

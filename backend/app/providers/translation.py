@@ -5,6 +5,8 @@ from urllib.request import Request, urlopen
 
 from flask import current_app, has_app_context
 
+from ..diagnostics import DiagnosticCheck, FAIL, PASS
+
 
 _LANGUAGE_CODES = {
     "arabic": "ar",
@@ -38,6 +40,10 @@ _LANGUAGE_CODES = {
 
 class BaseTranslationProvider:
     """Interface for text translation implementations."""
+
+    def check_ready(self, source_language=None, target_language=None):
+        """Return a provider-specific diagnostic readiness result."""
+        raise NotImplementedError
 
     def translate(self, text, source_language, target_language):
         """Translate one subtitle segment while preserving segment timing."""
@@ -74,6 +80,14 @@ class MockTranslationProvider(BaseTranslationProvider):
         },
     }
 
+    def check_ready(self, source_language=None, target_language=None):
+        return DiagnosticCheck(
+            "translation",
+            PASS,
+            "Mock translation provider is ready.",
+            {"provider": "mock"},
+        )
+
     def translate(self, text, source_language, target_language):
         # Provider boundary: real translation clients should implement the same
         # simple method and can be selected here from environment config later.
@@ -95,6 +109,54 @@ class LibreTranslateProvider(BaseTranslationProvider):
             timeout_seconds
             if timeout_seconds is not None
             else _setting("TRANSLATION_TIMEOUT_SECONDS", 30)
+        )
+
+    def check_ready(self, source_language=None, target_language=None):
+        """Confirm the service is reachable and required languages are installed."""
+        target_code = normalize_language(target_language) if target_language else None
+        if target_language and not target_code:
+            return DiagnosticCheck(
+                "translation",
+                FAIL,
+                f"Unsupported target language for translation: {target_language}",
+            )
+
+        request = Request(f"{self.base_url}/languages", method="GET")
+        try:
+            with urlopen(request, timeout=min(self.timeout_seconds, 5)) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, ValueError):
+            return DiagnosticCheck(
+                "translation",
+                FAIL,
+                f"LibreTranslate is unavailable at {self.base_url}.",
+            )
+
+        available = sorted(
+            str(language.get("code"))
+            for language in payload
+            if isinstance(language, dict) and language.get("code")
+        )
+        if target_code and target_code not in available:
+            return DiagnosticCheck(
+                "translation",
+                FAIL,
+                f"LibreTranslate does not have the {target_code} target language loaded.",
+                {"available_languages": available},
+            )
+        source_code = normalize_language(source_language) if source_language else None
+        if source_code and source_code not in available:
+            return DiagnosticCheck(
+                "translation",
+                FAIL,
+                f"LibreTranslate does not have the {source_code} source language loaded.",
+                {"available_languages": available},
+            )
+        return DiagnosticCheck(
+            "translation",
+            PASS,
+            "LibreTranslate is reachable and required languages are available.",
+            {"provider": "libretranslate", "available_languages": available},
         )
 
     def translate(self, text, source_language, target_language):
