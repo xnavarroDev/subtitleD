@@ -233,6 +233,67 @@ def test_whisperx_provider_transcribes_aligns_and_assigns_speakers(tmp_path):
     assert fake_whisperx.assign_word_speakers_calls
 
 
+def test_whisperx_provider_quick_readiness_does_not_load_models(tmp_path):
+    fake_whisperx = FakeWhisperXModule()
+    provider = WhisperXTranscriptionProvider(
+        model_dir=tmp_path / "models",
+        diarize=False,
+        whisperx_module=fake_whisperx,
+    )
+
+    result = provider.check_ready(deep=False)
+
+    assert result.status == "pass"
+    assert fake_whisperx.load_model_calls == []
+
+
+def test_whisperx_provider_deep_readiness_does_not_load_models(tmp_path, monkeypatch):
+    fake_whisperx = FakeWhisperXModule()
+    provider = WhisperXTranscriptionProvider(
+        model_dir=tmp_path / "models",
+        diarize=True,
+        hf_token="secret",
+        whisperx_module=fake_whisperx,
+    )
+    monkeypatch.setattr(
+        "app.providers.transcription.whisperx._verify_pyannote_model_access",
+        lambda _token: None,
+    )
+
+    result = provider.check_ready(deep=True)
+
+    assert result.status == "pass"
+    assert fake_whisperx.load_model_calls == []
+
+
+def test_whisperx_provider_model_load_readiness_loads_transcription_model(tmp_path):
+    fake_whisperx = FakeWhisperXModule()
+    provider = WhisperXTranscriptionProvider(
+        model_dir=tmp_path / "models",
+        diarize=False,
+        whisperx_module=fake_whisperx,
+    )
+
+    result = provider.check_ready(deep=True, load_models=True)
+
+    assert result.status == "pass"
+    assert len(fake_whisperx.load_model_calls) == 1
+
+
+def test_whisperx_provider_readiness_rejects_missing_token(tmp_path):
+    provider = WhisperXTranscriptionProvider(
+        model_dir=tmp_path / "models",
+        diarize=True,
+        hf_token="",
+        whisperx_module=FakeWhisperXModule(),
+    )
+
+    result = provider.check_ready()
+
+    assert result.status == "fail"
+    assert "HF_TOKEN" in result.message
+
+
 def test_whisperx_provider_uses_detected_language_for_alignment(tmp_path):
     fake_whisperx = FakeWhisperXModule(detected_language="es")
     provider = WhisperXTranscriptionProvider(

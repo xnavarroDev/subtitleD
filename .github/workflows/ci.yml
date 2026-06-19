@@ -55,6 +55,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
+      - name: Check backend dependency consistency
+        run: python -m pip check
+
       - name: Compile Python sources
         run: python -m compileall app tests
 
@@ -64,6 +67,10 @@ jobs:
   docker:
     name: Docker validation
     runs-on: ubuntu-latest
+    env:
+      TRANSLATION_PROVIDER: mock
+      WHISPERX_DIARIZE: "false"
+      WORKER_PING_TIMEOUT_SECONDS: "1"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -73,6 +80,64 @@ jobs:
 
       - name: Build application images
         run: docker compose build backend frontend
+
+      - name: Start database and Redis
+        run: docker compose up -d --wait postgres redis
+
+      - name: Start backend without worker
+        run: >-
+          docker compose run -d --no-deps --service-ports
+          --name subtitled-ci-backend backend
+
+      - name: Wait for backend health
+        run: |
+          for attempt in {1..30}; do
+            if curl --fail --silent http://localhost:5000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Verify diagnostics fail when worker is absent
+        run: |
+          status=$(curl --silent --output /tmp/diagnostics.json \
+            --write-out "%{http_code}" http://localhost:5000/api/diagnostics)
+          cat /tmp/diagnostics.json
+          test "$status" = "503"
+          grep --quiet "No Celery worker responded" /tmp/diagnostics.json
+
+      - name: Start worker
+        run: >-
+          docker compose run -d --no-deps
+          --name subtitled-ci-worker worker
+
+      - name: Verify live diagnostics pass
+        run: |
+          for attempt in {1..30}; do
+            status=$(curl --silent --output /tmp/diagnostics.json \
+              --write-out "%{http_code}" http://localhost:5000/api/diagnostics)
+            if [ "$status" = "200" ]; then
+              cat /tmp/diagnostics.json
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/diagnostics.json
+          exit 1
+
+      - name: Show integration logs on failure
+        if: failure()
+        run: |
+          docker logs subtitled-ci-backend || true
+          docker logs subtitled-ci-worker || true
+          docker compose logs postgres redis || true
+
+      - name: Stop integration stack
+        if: always()
+        run: |
+          docker rm --force subtitled-ci-backend subtitled-ci-worker || true
+          docker compose down --volumes --remove-orphans
 
   secret-scan:
     name: Secret scan

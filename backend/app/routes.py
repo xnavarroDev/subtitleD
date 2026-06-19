@@ -3,6 +3,7 @@ from pathlib import Path
 from flask import Blueprint, abort, current_app, jsonify, request, send_file
 from werkzeug.exceptions import HTTPException
 
+from .diagnostics import PreflightError, require_job_preflight, run_system_diagnostics
 from .extensions import db
 from .models import Project, ProjectStatus, SubtitleSegment
 from .utils.files import save_video_upload
@@ -55,6 +56,15 @@ def list_projects():
     return jsonify([project.to_dict() for project in projects])
 
 
+@api_bp.get("/diagnostics")
+def diagnostics():
+    """Return quick or deep runtime readiness diagnostics."""
+    deep = _parse_bool_query(request.args.get("deep"))
+    refresh = _parse_bool_query(request.args.get("refresh"))
+    report = run_system_diagnostics(deep=deep, refresh=refresh)
+    return jsonify(report.to_dict(include_details=False)), 200 if report.ready else 503
+
+
 @api_bp.get("/projects/<project_id>")
 def get_project(project_id):
     """Return project metadata and media/download URLs."""
@@ -90,6 +100,19 @@ def process_project(project_id):
     project = _project_or_404(project_id)
     if not project.source_video_path:
         return jsonify({"error": "Upload a video before processing"}), 400
+
+    try:
+        require_job_preflight("process", project)
+    except PreflightError as exc:
+        return (
+            jsonify(
+                {
+                    "error": str(exc),
+                    "diagnostics": exc.report.to_dict(include_details=False),
+                }
+            ),
+            503,
+        )
 
     from .tasks import process_video_task
 
@@ -172,6 +195,19 @@ def render_project(project_id):
     if not project.segments:
         return jsonify({"error": "Process the video before rendering"}), 400
 
+    try:
+        require_job_preflight("render", project)
+    except PreflightError as exc:
+        return (
+            jsonify(
+                {
+                    "error": str(exc),
+                    "diagnostics": exc.report.to_dict(include_details=False),
+                }
+            ),
+            503,
+        )
+
     from .tasks import render_video_task
 
     project.status = ProjectStatus.RENDERING
@@ -246,6 +282,10 @@ def _parse_optional_int(value, field_name):
     if parsed < 1:
         abort(400, description=f"{field_name} must be at least 1")
     return parsed
+
+
+def _parse_bool_query(value):
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _send_existing_file(path, as_attachment=False):

@@ -47,6 +47,10 @@ class TranscriptSegment:
 class BaseTranscriptionProvider:
     """Interface for speech-to-text implementations."""
 
+    def check_ready(self, deep=False, load_models=False):
+        """Return a provider-specific diagnostic readiness result."""
+        raise NotImplementedError
+
     def transcribe(self, audio_path, source_language, min_speakers=None, max_speakers=None):
         """Return ordered timestamped transcript segments for an audio file."""
         raise NotImplementedError
