@@ -213,19 +213,56 @@ textarea {
 }
 
 .project-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
+  position: relative;
   border: 1px solid #dce4e1;
   border-radius: 8px;
+}
+
+.project-row-link {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 72px;
+  padding: 12px;
+  padding-right: 44px;
   text-decoration: none;
+}
+
+.project-row-content {
+  min-width: 0;
 }
 
 .project-row strong,
 .project-row span {
   display: block;
+}
+
+.project-row-actions {
+  display: flex;
+  align-items: center;
+}
+
+.project-delete-button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #7b8985;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.project-delete-button:hover:not(:disabled) {
+  color: #a21f31;
+  border-color: transparent;
+  background: #fff0f2;
+  box-shadow: none;
+  transform: none;
 }
 
 .back-link {

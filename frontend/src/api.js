@@ -9,6 +9,8 @@
  * @property {string} status
  * @property {string} source_language
  * @property {string} target_language
+ * @property {string} source_language_name
+ * @property {string} target_language_name
  * @property {number|null} min_speakers
  * @property {number|null} max_speakers
  * @property {string|null} error_message
@@ -98,6 +100,28 @@ export function createProject(payload) {
 /** Return the dashboard's recent project list. */
 export function listProjects() {
   return apiRequest("/projects");
+}
+
+/** Permanently delete a project and its generated artifacts. */
+export async function deleteProject(projectId) {
+  const response = await fetch(`${API_BASE}/projects/${projectId}`, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    let message = `Request failed with ${response.status}`;
+    try {
+      const payload = await response.json();
+      message = payload.error || message;
+    } catch {
+      // Keep the generic message when the response is not JSON.
+    }
+    throw new Error(message);
+  }
+}
+
+/** Return languages currently available from the configured translation provider. */
+export function listLanguages() {
+  return apiRequest("/languages");
 }
 
 /** Load project metadata, including status and media URLs. */

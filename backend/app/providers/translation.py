@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -37,9 +38,20 @@ _LANGUAGE_CODES = {
     "es": "es",
 }
 
+_LANGUAGE_CODE_PATTERN = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$")
+_MOCK_LANGUAGES = [
+    {"code": code, "name": name.title(), "targets": []}
+    for name, code in _LANGUAGE_CODES.items()
+    if name != code
+]
+
 
 class BaseTranslationProvider:
     """Interface for text translation implementations."""
+
+    def get_languages(self):
+        """Return languages currently available from this provider."""
+        raise NotImplementedError
 
     def check_ready(self, source_language=None, target_language=None):
         """Return a provider-specific diagnostic readiness result."""
@@ -80,6 +92,9 @@ class MockTranslationProvider(BaseTranslationProvider):
         },
     }
 
+    def get_languages(self):
+        return _MOCK_LANGUAGES
+
     def check_ready(self, source_language=None, target_language=None):
         return DiagnosticCheck(
             "translation",
@@ -111,6 +126,35 @@ class LibreTranslateProvider(BaseTranslationProvider):
             else _setting("TRANSLATION_TIMEOUT_SECONDS", 30)
         )
 
+    def get_languages(self):
+        """Return LibreTranslate's live list of installed language models."""
+        request = Request(f"{self.base_url}/languages", method="GET")
+        try:
+            with urlopen(request, timeout=min(self.timeout_seconds, 5)) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+            raise RuntimeError(
+                f"LibreTranslate is unavailable at {self.base_url}"
+            ) from exc
+
+        languages = []
+        for language in payload:
+            if not isinstance(language, dict) or not language.get("code"):
+                continue
+            code = str(language["code"])
+            languages.append(
+                {
+                    "code": code,
+                    "name": str(language.get("name") or code),
+                    "targets": [
+                        str(target)
+                        for target in language.get("targets", [])
+                        if target
+                    ],
+                }
+            )
+        return sorted(languages, key=lambda language: language["name"].casefold())
+
     def check_ready(self, source_language=None, target_language=None):
         """Confirm the service is reachable and required languages are installed."""
         target_code = normalize_language(target_language) if target_language else None
@@ -121,22 +165,16 @@ class LibreTranslateProvider(BaseTranslationProvider):
                 f"Unsupported target language for translation: {target_language}",
             )
 
-        request = Request(f"{self.base_url}/languages", method="GET")
         try:
-            with urlopen(request, timeout=min(self.timeout_seconds, 5)) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, ValueError):
+            languages = self.get_languages()
+        except RuntimeError:
             return DiagnosticCheck(
                 "translation",
                 FAIL,
                 f"LibreTranslate is unavailable at {self.base_url}.",
             )
 
-        available = sorted(
-            str(language.get("code"))
-            for language in payload
-            if isinstance(language, dict) and language.get("code")
-        )
+        available = sorted(language["code"] for language in languages)
         if target_code and target_code not in available:
             return DiagnosticCheck(
                 "translation",
@@ -145,7 +183,7 @@ class LibreTranslateProvider(BaseTranslationProvider):
                 {"available_languages": available},
             )
         source_code = normalize_language(source_language) if source_language else None
-        if source_code and source_code not in available:
+        if source_code and source_code != "auto" and source_code not in available:
             return DiagnosticCheck(
                 "translation",
                 FAIL,
@@ -217,7 +255,12 @@ def normalize_language(language):
     if not language:
         return None
     normalized = str(language).strip().lower().replace("_", "-")
-    return _LANGUAGE_CODES.get(normalized)
+    known_code = _LANGUAGE_CODES.get(normalized)
+    if known_code:
+        return known_code
+    if normalized == "auto" or _LANGUAGE_CODE_PATTERN.fullmatch(normalized):
+        return normalized
+    return None
 
 
 def _setting(name, default):

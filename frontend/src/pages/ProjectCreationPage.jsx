@@ -1,23 +1,39 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { createProject, listProjects, uploadProjectVideo } from "../api";
+import {
+  createProject,
+  deleteProject,
+  listLanguages,
+  listProjects,
+  uploadProjectVideo
+} from "../api";
 import StatusPill from "../components/StatusPill";
 
 export default function ProjectCreationPage() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
+  const [languages, setLanguages] = useState([]);
   const [title, setTitle] = useState("");
-  const [sourceLanguage, setSourceLanguage] = useState("English");
-  const [targetLanguage, setTargetLanguage] = useState("Spanish");
+  const [sourceLanguage, setSourceLanguage] = useState("");
+  const [targetLanguage, setTargetLanguage] = useState("");
   const [minSpeakers, setMinSpeakers] = useState("");
   const [maxSpeakers, setMaxSpeakers] = useState("");
   const [videoFile, setVideoFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [deletingProjectId, setDeletingProjectId] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     listProjects().then(setProjects).catch(() => setProjects([]));
+    listLanguages()
+      .then((availableLanguages) => {
+        setLanguages(availableLanguages);
+        const codes = new Set(availableLanguages.map((language) => language.code));
+        setSourceLanguage(codes.has("en") ? "en" : availableLanguages[0]?.code || "");
+        setTargetLanguage(codes.has("es") ? "es" : availableLanguages[1]?.code || "");
+      })
+      .catch(() => setError("Could not load the translation provider's languages."));
   }, []);
 
   async function handleSubmit(event) {
@@ -52,6 +68,25 @@ export default function ProjectCreationPage() {
     }
   }
 
+  async function handleDeleteProject(project) {
+    if (!window.confirm(`Delete "${project.title}" and all of its files?`)) {
+      return;
+    }
+
+    setDeletingProjectId(project.id);
+    setError(null);
+    try {
+      await deleteProject(project.id);
+      setProjects((current) =>
+        current.filter((candidate) => candidate.id !== project.id)
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Project deletion failed.");
+    } finally {
+      setDeletingProjectId(null);
+    }
+  }
+
   return (
     <main className="page-shell">
       <section className="workspace-grid">
@@ -77,19 +112,34 @@ export default function ProjectCreationPage() {
           <div className="form-row">
             <label>
               <span>Source language</span>
-              <input
+              <select
                 value={sourceLanguage}
                 onChange={(event) => setSourceLanguage(event.target.value)}
                 required
-              />
+              >
+                <option value="auto">Auto-detect</option>
+                <option value="" disabled>Select a language</option>
+                {languages.map((language) => (
+                  <option value={language.code} key={language.code}>
+                    {language.name} ({language.code})
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               <span>Target language</span>
-              <input
+              <select
                 value={targetLanguage}
                 onChange={(event) => setTargetLanguage(event.target.value)}
                 required
-              />
+              >
+                <option value="" disabled>Select a language</option>
+                {languages.map((language) => (
+                  <option value={language.code} key={language.code}>
+                    {language.name} ({language.code})
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
 
@@ -128,7 +178,12 @@ export default function ProjectCreationPage() {
 
           {error ? <div className="notice error">{error}</div> : null}
 
-          <button className="primary-action" disabled={submitting || !title.trim()}>
+          <button
+            className="primary-action"
+            disabled={
+              submitting || !title.trim() || !sourceLanguage || !targetLanguage
+            }
+          >
             {submitting ? "Creating..." : "Create and Upload"}
           </button>
         </form>
@@ -143,15 +198,33 @@ export default function ProjectCreationPage() {
           <div className="project-list">
             {projects.length ? (
               projects.map((project) => (
-                <Link className="project-row" to={`/projects/${project.id}`} key={project.id}>
-                  <div>
-                    <strong>{project.title}</strong>
-                    <span>
-                      {project.source_language} to {project.target_language}
-                    </span>
+                <div className="project-row" key={project.id}>
+                  <Link
+                    className="project-row-link"
+                    to={`/projects/${project.id}`}
+                  >
+                    <div className="project-row-content">
+                      <strong>{project.title}</strong>
+                      <span>
+                        {project.source_language_name || project.source_language} to{" "}
+                        {project.target_language_name || project.target_language}
+                      </span>
+                    </div>
+                    <StatusPill status={project.status} />
+                  </Link>
+                  <div className="project-row-actions">
+                    <button
+                      aria-label={`Delete ${project.title}`}
+                      className="project-delete-button"
+                      disabled={deletingProjectId === project.id}
+                      onClick={() => handleDeleteProject(project)}
+                      title={`Delete ${project.title}`}
+                      type="button"
+                    >
+                      {"\u00D7"}
+                    </button>
                   </div>
-                  <StatusPill status={project.status} />
-                </Link>
+                </div>
               ))
             ) : (
               <div className="empty-state">No projects yet.</div>

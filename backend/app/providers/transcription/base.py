@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass
 
 from flask import current_app, has_app_context
@@ -33,6 +34,8 @@ _LANGUAGE_CODES = {
     "es": "es",
 }
 
+_LANGUAGE_CODE_PATTERN = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$")
+
 
 @dataclass(frozen=True)
 class TranscriptSegment:
@@ -61,7 +64,14 @@ def normalize_language(source_language):
     if not source_language:
         return None
     normalized = str(source_language).strip().lower().replace("_", "-")
-    return _LANGUAGE_CODES.get(normalized)
+    known_code = _LANGUAGE_CODES.get(normalized)
+    if known_code:
+        return known_code
+    if normalized == "auto":
+        return None
+    if _LANGUAGE_CODE_PATTERN.fullmatch(normalized):
+        return normalized
+    return None
 
 
 def get_setting(name, default):

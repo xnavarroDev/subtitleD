@@ -6,6 +6,7 @@ from werkzeug.exceptions import HTTPException
 from .diagnostics import PreflightError, require_job_preflight, run_system_diagnostics
 from .extensions import db
 from .models import Project, ProjectStatus, SubtitleSegment
+from .providers import get_translation_provider
 from .utils.files import save_video_upload
 from .utils.srt import generate_srt
 
@@ -53,7 +54,23 @@ def create_project():
 def list_projects():
     """Return projects newest-first for the dashboard list."""
     projects = Project.query.order_by(Project.created_at.desc()).all()
-    return jsonify([project.to_dict() for project in projects])
+    language_names = _translation_language_names()
+    return jsonify(
+        [
+            project.to_dict(language_names=language_names)
+            for project in projects
+        ]
+    )
+
+
+@api_bp.get("/languages")
+def list_languages():
+    """Return the languages currently exposed by the translation provider."""
+    try:
+        languages = get_translation_provider().get_languages()
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    return jsonify(languages)
 
 
 @api_bp.get("/diagnostics")
@@ -69,7 +86,24 @@ def diagnostics():
 def get_project(project_id):
     """Return project metadata and media/download URLs."""
     project = _project_or_404(project_id)
-    return jsonify(project.to_dict())
+    return jsonify(project.to_dict(language_names=_translation_language_names()))
+
+
+@api_bp.delete("/projects/<project_id>")
+def delete_project(project_id):
+    """Delete a project, its subtitle rows, and its generated artifacts."""
+    project = _project_or_404(project_id)
+    artifact_paths = [
+        project.source_video_path,
+        project.extracted_audio_path,
+        project.output_video_path,
+        project.srt_path,
+    ]
+
+    db.session.delete(project)
+    db.session.commit()
+    _delete_project_artifacts(artifact_paths)
+    return "", 204
 
 
 @api_bp.post("/projects/<project_id>/video")
@@ -293,3 +327,36 @@ def _send_existing_file(path, as_attachment=False):
     if not path or not Path(path).exists():
         abort(404, description="File not found")
     return send_file(path, as_attachment=as_attachment)
+
+
+def _translation_language_names():
+    """Return provider language names without making project reads fail."""
+    try:
+        languages = get_translation_provider().get_languages()
+    except (RuntimeError, ValueError):
+        return {}
+    return {
+        str(language["code"]).strip().lower().replace("_", "-"): str(
+            language.get("name") or language["code"]
+        )
+        for language in languages
+        if isinstance(language, dict) and language.get("code")
+    }
+
+
+def _delete_project_artifacts(paths):
+    """Remove project files only when they live inside configured storage."""
+    storage_dir = Path(current_app.config["STORAGE_DIR"]).resolve()
+    for value in paths:
+        if not value:
+            continue
+        path = Path(value).resolve()
+        if path == storage_dir or storage_dir not in path.parents:
+            current_app.logger.warning(
+                "Skipped deleting project artifact outside storage: %s", path
+            )
+            continue
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            current_app.logger.exception("Could not delete project artifact: %s", path)
