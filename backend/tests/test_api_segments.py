@@ -15,6 +15,7 @@ class TestConfig:
     CELERY_RESULT_BACKEND = "cache+memory://"
     CORS_ORIGINS = ["http://localhost:5173"]
     CREATE_TABLES = True
+    TRANSLATION_PROVIDER = "mock"
 
 
 @pytest.fixture()
@@ -95,6 +96,23 @@ def test_create_project_rejects_invalid_speaker_hint_range(client):
 
     assert response.status_code == 400
     assert "min_speakers" in response.json["error"]
+
+
+def test_get_project_includes_language_display_names(client):
+    created = client.post(
+        "/api/projects",
+        json={
+            "title": "Named languages",
+            "source_language": "en",
+            "target_language": "es",
+        },
+    )
+
+    response = client.get(f"/api/projects/{created.json['id']}")
+
+    assert response.status_code == 200
+    assert response.json["source_language_name"] == "English"
+    assert response.json["target_language_name"] == "Spanish"
 
 
 def test_patch_segment_updates_speaker_label(client, app):

@@ -53,12 +53,13 @@ class Project(db.Model):
         order_by="SubtitleSegment.segment_index",
     )
 
-    def to_dict(self, include_segments=False):
+    def to_dict(self, include_segments=False, language_names=None):
         """Serialize a project for API responses.
 
         File-system paths are included for MVP visibility, while URL fields
         provide the values the frontend should use for previews/downloads.
         """
+        language_names = language_names or {}
         data = {
             "id": self.id,
             "title": self.title,
@@ -69,6 +70,12 @@ class Project(db.Model):
             "status": self.status,
             "source_language": self.source_language,
             "target_language": self.target_language,
+            "source_language_name": _language_display_name(
+                self.source_language, language_names
+            ),
+            "target_language_name": _language_display_name(
+                self.target_language, language_names
+            ),
             "min_speakers": self.min_speakers,
             "max_speakers": self.max_speakers,
             "error_message": self.error_message,
@@ -90,6 +97,13 @@ class Project(db.Model):
         if include_segments:
             data["segments"] = [segment.to_dict() for segment in self.segments]
         return data
+
+
+def _language_display_name(value, language_names):
+    normalized = str(value or "").strip().lower().replace("_", "-")
+    if normalized == "auto":
+        return "Auto-detect"
+    return language_names.get(normalized) or value
 
 
 class SubtitleSegment(db.Model):

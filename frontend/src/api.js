@@ -9,6 +9,8 @@
  * @property {string} status
  * @property {string} source_language
  * @property {string} target_language
+ * @property {string} source_language_name
+ * @property {string} target_language_name
  * @property {number|null} min_speakers
  * @property {number|null} max_speakers
  * @property {string|null} error_message

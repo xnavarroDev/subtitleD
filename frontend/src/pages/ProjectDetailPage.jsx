@@ -100,7 +100,8 @@ export default function ProjectDetailPage() {
           </Link>
           <h1>{project.title}</h1>
           <p>
-            {project.source_language} to {project.target_language}
+            {project.source_language_name || project.source_language} to{" "}
+            {project.target_language_name || project.target_language}
           </p>
         </div>
         <StatusPill status={project.status} />

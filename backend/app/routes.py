@@ -54,7 +54,13 @@ def create_project():
 def list_projects():
     """Return projects newest-first for the dashboard list."""
     projects = Project.query.order_by(Project.created_at.desc()).all()
-    return jsonify([project.to_dict() for project in projects])
+    language_names = _translation_language_names()
+    return jsonify(
+        [
+            project.to_dict(language_names=language_names)
+            for project in projects
+        ]
+    )
 
 
 @api_bp.get("/languages")
@@ -80,7 +86,7 @@ def diagnostics():
 def get_project(project_id):
     """Return project metadata and media/download URLs."""
     project = _project_or_404(project_id)
-    return jsonify(project.to_dict())
+    return jsonify(project.to_dict(language_names=_translation_language_names()))
 
 
 @api_bp.delete("/projects/<project_id>")
@@ -321,6 +327,21 @@ def _send_existing_file(path, as_attachment=False):
     if not path or not Path(path).exists():
         abort(404, description="File not found")
     return send_file(path, as_attachment=as_attachment)
+
+
+def _translation_language_names():
+    """Return provider language names without making project reads fail."""
+    try:
+        languages = get_translation_provider().get_languages()
+    except (RuntimeError, ValueError):
+        return {}
+    return {
+        str(language["code"]).strip().lower().replace("_", "-"): str(
+            language.get("name") or language["code"]
+        )
+        for language in languages
+        if isinstance(language, dict) and language.get("code")
+    }
 
 
 def _delete_project_artifacts(paths):

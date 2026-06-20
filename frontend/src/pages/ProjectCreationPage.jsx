@@ -206,7 +206,8 @@ export default function ProjectCreationPage() {
                     <div className="project-row-content">
                       <strong>{project.title}</strong>
                       <span>
-                        {project.source_language} to {project.target_language}
+                        {project.source_language_name || project.source_language} to{" "}
+                        {project.target_language_name || project.target_language}
                       </span>
                     </div>
                     <StatusPill status={project.status} />
