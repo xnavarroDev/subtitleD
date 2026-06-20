@@ -83,6 +83,23 @@ def get_project(project_id):
     return jsonify(project.to_dict())
 
 
+@api_bp.delete("/projects/<project_id>")
+def delete_project(project_id):
+    """Delete a project, its subtitle rows, and its generated artifacts."""
+    project = _project_or_404(project_id)
+    artifact_paths = [
+        project.source_video_path,
+        project.extracted_audio_path,
+        project.output_video_path,
+        project.srt_path,
+    ]
+
+    db.session.delete(project)
+    db.session.commit()
+    _delete_project_artifacts(artifact_paths)
+    return "", 204
+
+
 @api_bp.post("/projects/<project_id>/video")
 def upload_video(project_id):
     """Validate and attach an uploaded source video to a project."""
@@ -304,3 +321,21 @@ def _send_existing_file(path, as_attachment=False):
     if not path or not Path(path).exists():
         abort(404, description="File not found")
     return send_file(path, as_attachment=as_attachment)
+
+
+def _delete_project_artifacts(paths):
+    """Remove project files only when they live inside configured storage."""
+    storage_dir = Path(current_app.config["STORAGE_DIR"]).resolve()
+    for value in paths:
+        if not value:
+            continue
+        path = Path(value).resolve()
+        if path == storage_dir or storage_dir not in path.parents:
+            current_app.logger.warning(
+                "Skipped deleting project artifact outside storage: %s", path
+            )
+            continue
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            current_app.logger.exception("Could not delete project artifact: %s", path)

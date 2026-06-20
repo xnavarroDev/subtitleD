@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import {
   createProject,
+  deleteProject,
   listLanguages,
   listProjects,
   uploadProjectVideo
@@ -20,6 +21,7 @@ export default function ProjectCreationPage() {
   const [maxSpeakers, setMaxSpeakers] = useState("");
   const [videoFile, setVideoFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [deletingProjectId, setDeletingProjectId] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -63,6 +65,25 @@ export default function ProjectCreationPage() {
       setError(caught instanceof Error ? caught.message : "Project creation failed.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleDeleteProject(project) {
+    if (!window.confirm(`Delete "${project.title}" and all of its files?`)) {
+      return;
+    }
+
+    setDeletingProjectId(project.id);
+    setError(null);
+    try {
+      await deleteProject(project.id);
+      setProjects((current) =>
+        current.filter((candidate) => candidate.id !== project.id)
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Project deletion failed.");
+    } finally {
+      setDeletingProjectId(null);
     }
   }
 
@@ -177,15 +198,32 @@ export default function ProjectCreationPage() {
           <div className="project-list">
             {projects.length ? (
               projects.map((project) => (
-                <Link className="project-row" to={`/projects/${project.id}`} key={project.id}>
-                  <div>
-                    <strong>{project.title}</strong>
-                    <span>
-                      {project.source_language} to {project.target_language}
-                    </span>
+                <div className="project-row" key={project.id}>
+                  <Link
+                    className="project-row-link"
+                    to={`/projects/${project.id}`}
+                  >
+                    <div className="project-row-content">
+                      <strong>{project.title}</strong>
+                      <span>
+                        {project.source_language} to {project.target_language}
+                      </span>
+                    </div>
+                    <StatusPill status={project.status} />
+                  </Link>
+                  <div className="project-row-actions">
+                    <button
+                      aria-label={`Delete ${project.title}`}
+                      className="project-delete-button"
+                      disabled={deletingProjectId === project.id}
+                      onClick={() => handleDeleteProject(project)}
+                      title={`Delete ${project.title}`}
+                      type="button"
+                    >
+                      {"\u00D7"}
+                    </button>
                   </div>
-                  <StatusPill status={project.status} />
-                </Link>
+                </div>
               ))
             ) : (
               <div className="empty-state">No projects yet.</div>

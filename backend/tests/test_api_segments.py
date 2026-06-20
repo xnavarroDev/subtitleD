@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from app import create_app
@@ -124,3 +126,44 @@ def test_patch_segment_updates_speaker_label(client, app):
 
     assert response.status_code == 200
     assert response.json["speaker_label"] == "SPEAKER_01"
+
+
+def test_delete_project_removes_record_segments_and_artifacts(client, app, tmp_path):
+    with app.app_context():
+        storage_dir = Path(app.config["STORAGE_DIR"])
+        upload_path = storage_dir / "uploads" / "video.mp4"
+        audio_path = storage_dir / "audio" / "audio.wav"
+        upload_path.write_bytes(b"video")
+        audio_path.write_bytes(b"audio")
+
+        project = Project(
+            title="Delete me",
+            source_language="English",
+            target_language="Spanish",
+            source_video_path=str(upload_path),
+            extracted_audio_path=str(audio_path),
+            status=ProjectStatus.PROCESSED,
+        )
+        db.session.add(project)
+        db.session.flush()
+        segment = SubtitleSegment(
+            project_id=project.id,
+            start_time=0,
+            end_time=1,
+            original_text="Hello",
+            translated_text="Hola",
+            segment_index=0,
+        )
+        db.session.add(segment)
+        db.session.commit()
+        project_id = project.id
+        segment_id = segment.id
+
+    response = client.delete(f"/api/projects/{project_id}")
+
+    assert response.status_code == 204
+    assert not upload_path.exists()
+    assert not audio_path.exists()
+    with app.app_context():
+        assert db.session.get(Project, project_id) is None
+        assert db.session.get(SubtitleSegment, segment_id) is None

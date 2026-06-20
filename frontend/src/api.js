@@ -100,6 +100,23 @@ export function listProjects() {
   return apiRequest("/projects");
 }
 
+/** Permanently delete a project and its generated artifacts. */
+export async function deleteProject(projectId) {
+  const response = await fetch(`${API_BASE}/projects/${projectId}`, {
+    method: "DELETE"
+  });
+  if (!response.ok) {
+    let message = `Request failed with ${response.status}`;
+    try {
+      const payload = await response.json();
+      message = payload.error || message;
+    } catch {
+      // Keep the generic message when the response is not JSON.
+    }
+    throw new Error(message);
+  }
+}
+
 /** Return languages currently available from the configured translation provider. */
 export function listLanguages() {
   return apiRequest("/languages");
