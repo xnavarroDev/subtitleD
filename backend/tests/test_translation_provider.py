@@ -56,6 +56,9 @@ def test_get_translation_provider_rejects_unknown_provider(monkeypatch):
         ("Spanish", "es"),
         ("french", "fr"),
         ("EN", "en"),
+        ("uk", "uk"),
+        ("pt-br", "pt-br"),
+        ("auto", "auto"),
         ("made up language", None),
         ("", None),
         (None, None),
@@ -116,6 +119,25 @@ def test_libretranslate_readiness_checks_required_languages(monkeypatch):
 
     assert result.status == "pass"
     assert result.details["available_languages"] == ["en", "es"]
+
+
+def test_libretranslate_provider_returns_installed_languages(monkeypatch):
+    monkeypatch.setattr(
+        translation,
+        "urlopen",
+        lambda request, timeout: FakeResponse(
+            [
+                {"code": "es", "name": "Spanish", "targets": ["en"]},
+                {"code": "en", "name": "English", "targets": ["es"]},
+            ]
+        ),
+    )
+    provider = LibreTranslateProvider(base_url="http://translator:5000")
+
+    assert provider.get_languages() == [
+        {"code": "en", "name": "English", "targets": ["es"]},
+        {"code": "es", "name": "Spanish", "targets": ["en"]},
+    ]
 
 
 def test_libretranslate_readiness_rejects_missing_target_language(monkeypatch):

@@ -1,15 +1,21 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { createProject, listProjects, uploadProjectVideo } from "../api";
+import {
+  createProject,
+  listLanguages,
+  listProjects,
+  uploadProjectVideo
+} from "../api";
 import StatusPill from "../components/StatusPill";
 
 export default function ProjectCreationPage() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
+  const [languages, setLanguages] = useState([]);
   const [title, setTitle] = useState("");
-  const [sourceLanguage, setSourceLanguage] = useState("English");
-  const [targetLanguage, setTargetLanguage] = useState("Spanish");
+  const [sourceLanguage, setSourceLanguage] = useState("");
+  const [targetLanguage, setTargetLanguage] = useState("");
   const [minSpeakers, setMinSpeakers] = useState("");
   const [maxSpeakers, setMaxSpeakers] = useState("");
   const [videoFile, setVideoFile] = useState(null);
@@ -18,6 +24,14 @@ export default function ProjectCreationPage() {
 
   useEffect(() => {
     listProjects().then(setProjects).catch(() => setProjects([]));
+    listLanguages()
+      .then((availableLanguages) => {
+        setLanguages(availableLanguages);
+        const codes = new Set(availableLanguages.map((language) => language.code));
+        setSourceLanguage(codes.has("en") ? "en" : availableLanguages[0]?.code || "");
+        setTargetLanguage(codes.has("es") ? "es" : availableLanguages[1]?.code || "");
+      })
+      .catch(() => setError("Could not load the translation provider's languages."));
   }, []);
 
   async function handleSubmit(event) {
@@ -77,19 +91,34 @@ export default function ProjectCreationPage() {
           <div className="form-row">
             <label>
               <span>Source language</span>
-              <input
+              <select
                 value={sourceLanguage}
                 onChange={(event) => setSourceLanguage(event.target.value)}
                 required
-              />
+              >
+                <option value="auto">Auto-detect</option>
+                <option value="" disabled>Select a language</option>
+                {languages.map((language) => (
+                  <option value={language.code} key={language.code}>
+                    {language.name} ({language.code})
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               <span>Target language</span>
-              <input
+              <select
                 value={targetLanguage}
                 onChange={(event) => setTargetLanguage(event.target.value)}
                 required
-              />
+              >
+                <option value="" disabled>Select a language</option>
+                {languages.map((language) => (
+                  <option value={language.code} key={language.code}>
+                    {language.name} ({language.code})
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
 
@@ -128,7 +157,12 @@ export default function ProjectCreationPage() {
 
           {error ? <div className="notice error">{error}</div> : null}
 
-          <button className="primary-action" disabled={submitting || !title.trim()}>
+          <button
+            className="primary-action"
+            disabled={
+              submitting || !title.trim() || !sourceLanguage || !targetLanguage
+            }
+          >
             {submitting ? "Creating..." : "Create and Upload"}
           </button>
         </form>

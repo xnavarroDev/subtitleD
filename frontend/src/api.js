@@ -100,6 +100,11 @@ export function listProjects() {
   return apiRequest("/projects");
 }
 
+/** Return languages currently available from the configured translation provider. */
+export function listLanguages() {
+  return apiRequest("/languages");
+}
+
 /** Load project metadata, including status and media URLs. */
 export function getProject(projectId) {
   return apiRequest(`/projects/${projectId}`);

@@ -148,8 +148,8 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `TRANSLATION_PROVIDER`: `mock` or `libretranslate`
 - `LIBRETRANSLATE_URL`: LibreTranslate API base URL, default Docker service URL
 - `LIBRETRANSLATE_API_KEY`: Optional API key for protected LibreTranslate instances
-- `LIBRETRANSLATE_LOAD_ONLY`: Comma-separated LibreTranslate languages to install/load, defaulting to common MVP targets including Japanese
 - `LIBRETRANSLATE_UPDATE_MODELS`: Whether LibreTranslate should download missing models
+- `LIBRETRANSLATE_START_PERIOD`: Health-check grace period while language models load, default `30m`
 - `TRANSLATION_TIMEOUT_SECONDS`: Translation API timeout
 - `DIAGNOSTICS_TIMEOUT_SECONDS`: Timeout for Redis and FFmpeg readiness checks, default `2`
 - `DIAGNOSTICS_DEEP_CACHE_TTL_SECONDS`: Seconds to reuse a deep diagnostic report, default `300`
@@ -158,6 +158,13 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `WORKER_HEARTBEAT_TTL_SECONDS`: Seconds before a missing heartbeat marks a worker unavailable, default `15`
 - `WORKER_HEARTBEAT_KEY_PREFIX`: Redis key prefix for worker heartbeat records
 - `MIN_FREE_STORAGE_BYTES`: Free-space threshold that produces a storage warning, default `1073741824`
+
+LibreTranslate is left without `LT_LOAD_ONLY`, so it installs all available
+language models. The first startup can therefore take substantially longer and
+use more disk space. The project form reads the running provider's `/languages`
+catalog and only displays models that are actually available. The web app starts
+while LibreTranslate is loading; project processing remains unavailable until
+the translation service is ready.
 
 ## Runtime Diagnostics
 

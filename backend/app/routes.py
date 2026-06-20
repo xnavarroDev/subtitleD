@@ -6,6 +6,7 @@ from werkzeug.exceptions import HTTPException
 from .diagnostics import PreflightError, require_job_preflight, run_system_diagnostics
 from .extensions import db
 from .models import Project, ProjectStatus, SubtitleSegment
+from .providers import get_translation_provider
 from .utils.files import save_video_upload
 from .utils.srt import generate_srt
 
@@ -54,6 +55,16 @@ def list_projects():
     """Return projects newest-first for the dashboard list."""
     projects = Project.query.order_by(Project.created_at.desc()).all()
     return jsonify([project.to_dict() for project in projects])
+
+
+@api_bp.get("/languages")
+def list_languages():
+    """Return the languages currently exposed by the translation provider."""
+    try:
+        languages = get_translation_provider().get_languages()
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+    return jsonify(languages)
 
 
 @api_bp.get("/diagnostics")
