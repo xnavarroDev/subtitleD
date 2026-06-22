@@ -13,6 +13,7 @@ import ProjectMeta from "../components/ProjectMeta";
 import StatusPill from "../components/StatusPill";
 import SubtitleEditor from "../components/SubtitleEditor";
 import VideoPreview from "../components/VideoPreview";
+import "./ProjectDetailPage.css";
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams();

@@ -1,0 +1,19 @@
+.detail-header p {
+  margin: 6px 0 0;
+  color: #637670;
+}
+
+.back-link {
+  display: inline-block;
+  color: #126b61;
+  font-weight: 800;
+  margin-bottom: 8px;
+  text-decoration: none;
+}
+
+.actions-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+}

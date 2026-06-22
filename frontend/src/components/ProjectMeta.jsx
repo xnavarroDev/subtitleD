@@ -1,3 +1,5 @@
+import "./ProjectMeta.css";
+
 export default function ProjectMeta({ project }) {
   return (
     <section className="panel meta-panel">
