@@ -70,30 +70,6 @@ button:disabled {
   border-color: #126b61;
 }
 
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  height: 58px;
-  display: flex;
-  align-items: center;
-  padding: 0 28px;
-  background: rgba(255, 255, 255, 0.92);
-  border-bottom: 1px solid #dce4e1;
-  backdrop-filter: blur(10px);
-}
-
-.brand {
-  color: #102c35;
-  font-weight: 800;
-  text-decoration: none;
-}
-
-.page-shell {
-  width: min(1180px, calc(100% - 32px));
-  margin: 28px auto 48px;
-}
-
 .workspace-grid,
 .detail-grid {
   display: grid;
@@ -148,12 +124,6 @@ h2 {
   line-height: 1.25;
 }
 
-.detail-header p,
-.project-row span {
-  margin: 6px 0 0;
-  color: #637670;
-}
-
 label {
   display: grid;
   gap: 8px;
@@ -188,12 +158,6 @@ textarea {
   resize: vertical;
 }
 
-.form-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
 .notice {
   border-radius: 8px;
   padding: 10px 12px;
@@ -207,189 +171,6 @@ textarea {
   border: 1px solid #f0b8c0;
 }
 
-.project-list {
-  display: grid;
-  gap: 10px;
-}
-
-.project-row {
-  position: relative;
-  border: 1px solid #dce4e1;
-  border-radius: 8px;
-}
-
-.project-row-link {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 72px;
-  padding: 12px;
-  padding-right: 44px;
-  text-decoration: none;
-}
-
-.project-row-content {
-  min-width: 0;
-}
-
-.project-row strong,
-.project-row span {
-  display: block;
-}
-
-.project-row-actions {
-  display: flex;
-  align-items: center;
-}
-
-.project-delete-button {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  min-width: 30px;
-  min-height: 30px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #7b8985;
-  font-size: 22px;
-  line-height: 1;
-}
-
-.project-delete-button:hover:not(:disabled) {
-  color: #a21f31;
-  border-color: transparent;
-  background: #fff0f2;
-  box-shadow: none;
-  transform: none;
-}
-
-.back-link {
-  display: inline-block;
-  color: #126b61;
-  font-weight: 800;
-  margin-bottom: 8px;
-  text-decoration: none;
-}
-
-.actions-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 20px;
-}
-
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid #cad6d1;
-  background: #f4f7f6;
-  color: #33443f;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.status-pill.processed,
-.status-pill.rendered {
-  color: #0d5c38;
-  background: #e9f8ef;
-  border-color: #b9e6c9;
-}
-
-.status-pill.processing,
-.status-pill.rendering {
-  color: #7a4c00;
-  background: #fff6df;
-  border-color: #efd493;
-}
-
-.status-pill.failed {
-  color: #8f1e2e;
-  background: #fff0f2;
-  border-color: #f0b8c0;
-}
-
-.video-panel video {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  display: block;
-  border-radius: 8px;
-  background: #0f171a;
-}
-
-.meta-panel dl {
-  display: grid;
-  gap: 12px;
-  margin: 0;
-}
-
-.meta-panel div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid #edf2f0;
-  padding-bottom: 10px;
-}
-
-.meta-panel dt {
-  color: #60736d;
-  font-weight: 800;
-}
-
-.meta-panel dd {
-  margin: 0;
-  color: #172026;
-  text-align: right;
-}
-
-.editor-panel {
-  margin-top: 20px;
-}
-
-.table-wrap {
-  overflow-x: auto;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 820px;
-}
-
-th,
-td {
-  border-bottom: 1px solid #e2eae7;
-  padding: 12px 10px;
-  text-align: left;
-  vertical-align: top;
-}
-
-th {
-  color: #60736d;
-  font-size: 12px;
-  text-transform: uppercase;
-}
-
-.time-input {
-  width: 92px;
-}
-
-.speaker-input {
-  width: 132px;
-}
-
-.original-text {
-  max-width: 300px;
-  color: #31443e;
-}
-
 .empty-state {
   color: #687a75;
   border: 1px dashed #cbd8d4;
@@ -400,18 +181,8 @@ th {
 
 @media (max-width: 860px) {
   .workspace-grid,
-  .detail-grid,
-  .form-row {
+  .detail-grid {
     grid-template-columns: 1fr;
-  }
-
-  .topbar {
-    padding: 0 16px;
-  }
-
-  .page-shell {
-    width: min(100% - 20px, 1180px);
-    margin-top: 18px;
   }
 
   .panel {

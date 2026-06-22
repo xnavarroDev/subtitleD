@@ -1,0 +1,40 @@
+.editor-panel {
+  margin-top: 20px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 820px;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e2eae7;
+  padding: 12px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  color: #60736d;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.time-input {
+  width: 92px;
+}
+
+.speaker-input {
+  width: 132px;
+}
+
+.original-text {
+  max-width: 300px;
+  color: #31443e;
+}

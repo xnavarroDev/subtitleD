@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { listSegments, updateSegment } from "../api";
+import "./SubtitleEditor.css";
 
 export default function SubtitleEditor({ projectId, enabled }) {
   const [segments, setSegments] = useState([]);
