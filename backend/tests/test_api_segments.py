@@ -50,7 +50,7 @@ def test_project_serializer_includes_speaker_hints(app):
         assert project.to_dict()["max_speakers"] == 3
 
 
-def test_segment_serializer_includes_speaker_label(app):
+def test_segment_serializer_includes_speaker_label_and_confidence(app):
     with app.app_context():
         segment = SubtitleSegment(
             project_id="project-id",
@@ -59,10 +59,26 @@ def test_segment_serializer_includes_speaker_label(app):
             original_text="Hello",
             translated_text="Hola",
             speaker_label="SPEAKER_00",
+            transcription_confidence=0.87,
             segment_index=0,
         )
 
         assert segment.to_dict()["speaker_label"] == "SPEAKER_00"
+        assert segment.to_dict()["transcription_confidence"] == 0.87
+
+
+def test_project_serializer_includes_contextual_translation_progress(app):
+    with app.app_context():
+        project = Project(
+            title="Demo", source_language="en", target_language="es",
+            status=ProjectStatus.PROCESSING, processing_stage="contextual_translation",
+            translation_completed_words=12, translation_total_words=30,
+        )
+
+        payload = project.to_dict()
+
+        assert payload["processing_stage"] == "contextual_translation"
+        assert payload["translation_progress"] == {"completed": 12, "total": 30}
 
 
 def test_create_project_accepts_optional_speaker_hints(client):

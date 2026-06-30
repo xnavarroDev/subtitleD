@@ -4,6 +4,7 @@ import pytest
 
 from app.providers.transcription import (
     TranscriptSegment,
+    TranscriptWord,
     WhisperXTranscriptionProvider,
     WhisperXUnavailableError,
     get_transcription_provider,
@@ -50,8 +51,8 @@ class FakeWhisperXModule:
                     "end": 1.1,
                     "text": " Hello world ",
                     "words": [
-                        {"word": "Hello", "speaker": "SPEAKER_00"},
-                        {"word": "world", "speaker": "SPEAKER_00"},
+                        {"word": "Hello", "start": 0.0, "end": 0.5, "score": 0.91, "speaker": "SPEAKER_00"},
+                        {"word": "world", "start": 0.5, "end": 1.1, "score": 0.82, "speaker": "SPEAKER_00"},
                     ],
                 },
                 {"start": 1.2, "end": 2.0, "text": "   "},
@@ -188,6 +189,10 @@ def test_whisperx_provider_transcribes_aligns_and_assigns_speakers(tmp_path):
             end_time=1.1,
             text="Hello world",
             speaker_label="SPEAKER_00",
+            words=(
+                TranscriptWord("Hello", 0.0, 0.5, "SPEAKER_00", 0.91),
+                TranscriptWord("world", 0.5, 1.1, "SPEAKER_00", 0.82),
+            ),
         ),
         TranscriptSegment(
             start_time=2.1,
