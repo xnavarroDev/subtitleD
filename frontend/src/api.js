@@ -7,6 +7,9 @@
  * @property {string|null} output_video_path
  * @property {string|null} srt_path
  * @property {string} status
+ * @property {string|null} processing_stage
+ * @property {string|null} processing_warning
+ * @property {{completed:number,total:number}} translation_progress
  * @property {string} source_language
  * @property {string} target_language
  * @property {string} source_language_name
@@ -31,6 +34,7 @@
  * @property {string} original_text
  * @property {string} translated_text
  * @property {string|null} speaker_label
+ * @property {number|null} transcription_confidence
  * @property {number} segment_index
  * @property {string} created_at
  * @property {string} updated_at

@@ -24,6 +24,8 @@ export default function ProjectMeta({ project }) {
           <dt>Rendered video</dt>
           <dd>{project.output_video_path ? "Ready" : "Pending"}</dd>
         </div>
+        <div><dt>Processing stage</dt><dd>{project.processing_stage || "Not started"}</dd></div>
+        <div><dt>Translated words</dt><dd>{project.translation_progress?.completed || 0} / {project.translation_progress?.total || 0}</dd></div>
       </dl>
     </section>
   );

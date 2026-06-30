@@ -109,6 +109,7 @@ def run_system_diagnostics(deep=False, refresh=False, load_models=False):
         check_ffmpeg(require_subtitles=True),
         transcription_check,
         check_translation_provider(),
+        check_contextual_translation_provider(),
     )
     mode = "model_load" if load_models else ("deep" if deep else "quick")
     return DiagnosticReport(mode=mode, checks=checks, cached=cached)
@@ -138,6 +139,12 @@ def run_job_preflight(job_type, project, include_worker=True):
                 ),
             ]
         )
+        from .providers.translation import normalize_language
+
+        source = normalize_language(getattr(project, "source_language", None))
+        target = normalize_language(getattr(project, "target_language", None))
+        if source == "auto" or source != target:
+            checks.append(check_contextual_translation_provider())
     elif job_type == "render":
         checks.extend(
             [
@@ -382,6 +389,23 @@ def check_translation_provider(source_language=None, target_language=None):
             "translation",
             FAIL,
             _safe_error_message(exc, "Translation provider readiness check failed."),
+        )
+
+
+def check_contextual_translation_provider(required=False):
+    try:
+        from .providers import get_contextual_translation_provider
+
+        result = get_contextual_translation_provider().check_ready()
+        if required and result.status != PASS:
+            return DiagnosticCheck(result.name, FAIL, result.message, result.details)
+        if result.status == FAIL:
+            return DiagnosticCheck(result.name, WARN, result.message, result.details)
+        return result
+    except Exception as exc:
+        return DiagnosticCheck(
+            "contextual_translation", WARN,
+            _safe_error_message(exc, "Contextual translation readiness check failed."),
         )
 
 

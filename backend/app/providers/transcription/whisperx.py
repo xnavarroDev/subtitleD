@@ -6,6 +6,7 @@ from ...diagnostics import DiagnosticCheck, FAIL, PASS
 from .base import (
     BaseTranscriptionProvider,
     TranscriptSegment,
+    TranscriptWord,
     coerce_bool,
     get_setting,
     normalize_language,
@@ -285,10 +286,36 @@ class WhisperXTranscriptionProvider(BaseTranscriptionProvider):
                     end_time=float(segment["end"]),
                     text=text,
                     speaker_label=_segment_speaker(segment),
+                    words=tuple(
+                        word for word in (
+                            _to_transcript_word(value)
+                            for value in segment.get("words") or []
+                        ) if word is not None
+                    ),
                 )
             )
 
         return sorted(transcript_segments, key=lambda segment: segment.start_time)
+
+
+def _to_transcript_word(value):
+    text = (value.get("word") or "").strip()
+    if not text:
+        return None
+    return TranscriptWord(
+        text=text,
+        start_time=_optional_float(value.get("start")),
+        end_time=_optional_float(value.get("end")),
+        speaker_label=(value.get("speaker") or "").strip() or None,
+        confidence=_optional_float(value.get("score")),
+    )
+
+
+def _optional_float(value):
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _segment_speaker(segment):

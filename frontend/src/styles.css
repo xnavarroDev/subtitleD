@@ -207,6 +207,13 @@ textarea {
   border: 1px solid #f0b8c0;
 }
 
+.notice.warning,
+.notice.progress-notice {
+  color: #6f4800;
+  background: #fff6df;
+  border: 1px solid #efd493;
+}
+
 .project-list {
   display: grid;
   gap: 10px;
@@ -351,6 +358,25 @@ textarea {
 
 .editor-panel {
   margin-top: 20px;
+}
+
+.confidence {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #eef2f1;
+  color: #52645f;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.confidence.high { color: #0d5c38; background: #dff5e7; }
+.confidence.medium { color: #7a4c00; background: #fff6df; }
+.confidence.low { color: #8f1e2e; background: #ffe2e6; }
+
+.editor-help {
+  color: #60736d;
+  margin-top: -6px;
 }
 
 .table-wrap {

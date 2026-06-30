@@ -19,6 +19,20 @@ x-backend-environment: &backend-environment
   LIBRETRANSLATE_URL: ${LIBRETRANSLATE_URL:-http://libretranslate:5000}
   LIBRETRANSLATE_API_KEY: ${LIBRETRANSLATE_API_KEY:-}
   TRANSLATION_TIMEOUT_SECONDS: ${TRANSLATION_TIMEOUT_SECONDS:-30}
+  CONTEXTUAL_TRANSLATION_PROVIDER: ${CONTEXTUAL_TRANSLATION_PROVIDER:-openai-compatible}
+  LLM_BASE_URL: ${LLM_BASE_URL:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_MODEL: ${LLM_MODEL:-}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-60}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.1}
+  LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-256}
+  TRANSLATION_WINDOW_SECONDS: ${TRANSLATION_WINDOW_SECONDS:-12}
+  TRANSLATION_LOOKAHEAD_SECONDS: ${TRANSLATION_LOOKAHEAD_SECONDS:-3}
+  TRANSLATION_CONTEXT_CAPTIONS: ${TRANSLATION_CONTEXT_CAPTIONS:-2}
+  CAPTION_MAX_DURATION_SECONDS: ${CAPTION_MAX_DURATION_SECONDS:-6}
+  CAPTION_MAX_CHARS: ${CAPTION_MAX_CHARS:-84}
+  CAPTION_LINE_CHARS: ${CAPTION_LINE_CHARS:-42}
+  CAPTION_PAUSE_SECONDS: ${CAPTION_PAUSE_SECONDS:-0.65}
   DIAGNOSTICS_TIMEOUT_SECONDS: ${DIAGNOSTICS_TIMEOUT_SECONDS:-2}
   DIAGNOSTICS_DEEP_CACHE_TTL_SECONDS: ${DIAGNOSTICS_DEEP_CACHE_TTL_SECONDS:-300}
   WORKER_PING_TIMEOUT_SECONDS: ${WORKER_PING_TIMEOUT_SECONDS:-2}
@@ -84,6 +98,8 @@ services:
       FLASK_DEBUG: "1"
     ports:
       - "5000:5000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes: *backend-volumes
     depends_on:
       postgres:
@@ -98,6 +114,8 @@ services:
     command: celery -A celery_worker.celery_app worker --loglevel=info -P solo
     environment: *backend-environment
     volumes: *backend-volumes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

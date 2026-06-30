@@ -38,6 +38,15 @@ _LANGUAGE_CODE_PATTERN = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$")
 
 
 @dataclass(frozen=True)
+class TranscriptWord:
+    text: str
+    start_time: float | None = None
+    end_time: float | None = None
+    speaker_label: str | None = None
+    confidence: float | None = None
+
+
+@dataclass(frozen=True)
 class TranscriptSegment:
     """Provider-neutral transcription result used by processing tasks."""
 
@@ -45,6 +54,7 @@ class TranscriptSegment:
     end_time: float
     text: str
     speaker_label: str | None = None
+    words: tuple[TranscriptWord, ...] = ()
 
 
 class BaseTranscriptionProvider:

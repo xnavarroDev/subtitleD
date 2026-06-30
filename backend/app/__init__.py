@@ -72,9 +72,14 @@ def _upgrade_dev_schema():
         "projects": {
             "min_speakers": "INTEGER",
             "max_speakers": "INTEGER",
+            "processing_stage": "VARCHAR(64)",
+            "processing_warning": "VARCHAR(1000)",
+            "translation_completed_words": "INTEGER DEFAULT 0",
+            "translation_total_words": "INTEGER DEFAULT 0",
         },
         "subtitle_segments": {
             "speaker_label": "VARCHAR(64)",
+            "transcription_confidence": "FLOAT",
         },
     }
 

@@ -1,6 +1,6 @@
 # SubtitleD
 
-SubtitleD is an MVP subtitle translation web app. It lets you create a project, upload a video, run a background processing job that extracts audio, creates aligned WhisperX transcript segments, translates them, edit the translated subtitles, export SRT, burn subtitles into the video with FFmpeg, and download the rendered MP4.
+SubtitleD is an MVP subtitle translation web app. It extracts aligned WhisperX words, translates them with sliding-window LLM context, keeps the raw transcript visible for auditing, and produces editable subtitles, SRT exports, and rendered video.
 
 ## Tech Stack
 
@@ -151,6 +151,14 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `LIBRETRANSLATE_UPDATE_MODELS`: Whether LibreTranslate should download missing models
 - `LIBRETRANSLATE_START_PERIOD`: Health-check grace period while language models load, default `30m`
 - `TRANSLATION_TIMEOUT_SECONDS`: Translation API timeout
+- `CONTEXTUAL_TRANSLATION_PROVIDER`: `openai-compatible` for KoboldCpp or another compatible chat-completions server
+- `LLM_BASE_URL`: OpenAI-compatible API URL, e.g. `http://host.docker.internal:5002/v1` for KoboldCpp
+- `LLM_MODEL`: Model identifier sent to the chat-completions endpoint
+- `LLM_TIMEOUT_SECONDS`, `LLM_TEMPERATURE`, `LLM_MAX_TOKENS`: Contextual translation request controls
+- `TRANSLATION_WINDOW_SECONDS`: Source-time span sent to the LLM on each pass
+- `TRANSLATION_LOOKAHEAD_SECONDS`: Trailing overlap retained for the next translation pass
+- `TRANSLATION_CONTEXT_CAPTIONS`: Previously committed captions supplied as read-only context
+- `CAPTION_MAX_DURATION_SECONDS`, `CAPTION_MAX_CHARS`, `CAPTION_LINE_CHARS`, `CAPTION_PAUSE_SECONDS`: Subtitle readability controls
 - `DIAGNOSTICS_TIMEOUT_SECONDS`: Timeout for Redis and FFmpeg readiness checks, default `2`
 - `DIAGNOSTICS_DEEP_CACHE_TTL_SECONDS`: Seconds to reuse a deep diagnostic report, default `300`
 - `WORKER_PING_TIMEOUT_SECONDS`: Timeout for the Celery worker readiness ping, default `2`
@@ -169,7 +177,7 @@ the translation service is ready.
 ## Runtime Diagnostics
 
 `GET /api/diagnostics` runs quick checks for the database, Redis, Celery worker,
-storage, FFmpeg, WhisperX configuration, and the selected translation provider.
+storage, FFmpeg, WhisperX configuration, the fallback translation provider, and the contextual LLM.
 It returns HTTP `200` when ready and `503` when a required subsystem fails.
 
 Use `deep=true` to validate WhisperX package compatibility and gated diarization access.
@@ -237,6 +245,8 @@ The app keeps transcription and translation behind small interfaces so provider 
 
 Whisper is used for transcription only. Subtitle translation is handled separately because Whisper's built-in translation mode translates speech to English rather than arbitrary target languages.
 
+WhisperX output is preserved in each segment's `original_text`; the LLM never rewrites it. The contextual LLM receives timestamped word IDs in overlapping windows and returns the final target-language wording plus caption boundaries. Responses must cover every source word exactly once, in order, and obey speaker, duration, and character limits. Invalid or unavailable LLM responses are retried with a smaller window and then fall back to deterministic segmentation with the configured translation provider. Fallback use is shown as a non-fatal processing warning.
+
 WhisperX is required for transcription and is installed by the default backend image from `backend/requirements.txt`.
 Model caches are directed into `/app/storage/models`, which is bind-mounted to `backend/storage/models`, so repeated `docker compose up` and image rebuilds should not re-download the same Hugging Face, Torch, or Whisper model files. The backend Dockerfile also uses a BuildKit pip cache to speed up dependency rebuilds.
 
@@ -254,7 +264,7 @@ docker compose up -d backend worker
 - No authentication or user accounts yet
 - Translation quality depends on the configured LibreTranslate language models
 - WhisperX speaker diarization requires a Hugging Face token with access to the pyannote diarization model
-- No progress percentages
+- Processing progress is word-based; WhisperX itself does not yet expose fine-grained progress
 - Subtitle styling is limited to FFmpeg's default SRT rendering
 - Render quality depends on local FFmpeg support and source video codecs
 - Automatic table creation is intended for local MVP development, not production migrations
@@ -266,5 +276,4 @@ docker compose up -d backend worker
 - Additional translation providers
 - Subtitle styling with ASS files
 - User accounts
-- Progress percentages
 - Subtitle timing quality checker

@@ -5,8 +5,6 @@ from .extensions import db
 
 
 class ProjectStatus:
-    """Allowed project lifecycle states returned by the REST API."""
-
     CREATED = "created"
     UPLOADED = "uploaded"
     PROCESSING = "processing"
@@ -25,8 +23,6 @@ def _iso(dt):
 
 
 class Project(db.Model):
-    """A video translation project and its generated artifacts."""
-
     __tablename__ = "projects"
 
     id = db.Column(db.String(36), primary_key=True, default=_uuid)
@@ -36,15 +32,17 @@ class Project(db.Model):
     output_video_path = db.Column(db.String(1024), nullable=True)
     srt_path = db.Column(db.String(1024), nullable=True)
     status = db.Column(db.String(32), nullable=False, default=ProjectStatus.CREATED)
+    processing_stage = db.Column(db.String(64), nullable=True)
+    processing_warning = db.Column(db.String(1000), nullable=True)
+    translation_completed_words = db.Column(db.Integer, nullable=False, default=0)
+    translation_total_words = db.Column(db.Integer, nullable=False, default=0)
     source_language = db.Column(db.String(64), nullable=False)
     target_language = db.Column(db.String(64), nullable=False)
     min_speakers = db.Column(db.Integer, nullable=True)
     max_speakers = db.Column(db.Integer, nullable=True)
     error_message = db.Column(db.String(1000), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(
-        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     segments = db.relationship(
         "SubtitleSegment",
@@ -54,12 +52,9 @@ class Project(db.Model):
     )
 
     def to_dict(self, include_segments=False, language_names=None):
-        """Serialize a project for API responses.
-
-        File-system paths are included for MVP visibility, while URL fields
-        provide the values the frontend should use for previews/downloads.
-        """
         language_names = language_names or {}
+        total = int(self.translation_total_words or 0)
+        completed = int(self.translation_completed_words or 0)
         data = {
             "id": self.id,
             "title": self.title,
@@ -68,31 +63,22 @@ class Project(db.Model):
             "output_video_path": self.output_video_path,
             "srt_path": self.srt_path,
             "status": self.status,
+            "processing_stage": self.processing_stage,
+            "processing_warning": self.processing_warning,
+            "translation_progress": {"completed": completed, "total": total},
             "source_language": self.source_language,
             "target_language": self.target_language,
-            "source_language_name": _language_display_name(
-                self.source_language, language_names
-            ),
-            "target_language_name": _language_display_name(
-                self.target_language, language_names
-            ),
+            "source_language_name": _language_display_name(self.source_language, language_names),
+            "target_language_name": _language_display_name(self.target_language, language_names),
             "min_speakers": self.min_speakers,
             "max_speakers": self.max_speakers,
             "error_message": self.error_message,
             "created_at": _iso(self.created_at),
             "updated_at": _iso(self.updated_at),
-            "source_video_url": f"/api/projects/{self.id}/media/source"
-            if self.source_video_path
-            else None,
-            "rendered_video_url": f"/api/projects/{self.id}/media/rendered"
-            if self.output_video_path
-            else None,
-            "download_url": f"/api/projects/{self.id}/download"
-            if self.output_video_path
-            else None,
-            "srt_download_url": f"/api/projects/{self.id}/export/srt/download"
-            if self.srt_path
-            else None,
+            "source_video_url": f"/api/projects/{self.id}/media/source" if self.source_video_path else None,
+            "rendered_video_url": f"/api/projects/{self.id}/media/rendered" if self.output_video_path else None,
+            "download_url": f"/api/projects/{self.id}/download" if self.output_video_path else None,
+            "srt_download_url": f"/api/projects/{self.id}/export/srt/download" if self.srt_path else None,
         }
         if include_segments:
             data["segments"] = [segment.to_dict() for segment in self.segments]
@@ -107,8 +93,6 @@ def _language_display_name(value, language_names):
 
 
 class SubtitleSegment(db.Model):
-    """A timestamped subtitle row generated from transcription and translation."""
-
     __tablename__ = "subtitle_segments"
 
     id = db.Column(db.String(36), primary_key=True, default=_uuid)
@@ -118,16 +102,14 @@ class SubtitleSegment(db.Model):
     original_text = db.Column(db.Text, nullable=False)
     translated_text = db.Column(db.Text, nullable=False)
     speaker_label = db.Column(db.String(64), nullable=True)
+    transcription_confidence = db.Column(db.Float, nullable=True)
     segment_index = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(
-        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project = db.relationship("Project", back_populates="segments")
 
     def to_dict(self):
-        """Serialize a subtitle segment for the editor API."""
         return {
             "id": self.id,
             "project_id": self.project_id,
@@ -136,6 +118,7 @@ class SubtitleSegment(db.Model):
             "original_text": self.original_text,
             "translated_text": self.translated_text,
             "speaker_label": self.speaker_label,
+            "transcription_confidence": self.transcription_confidence,
             "segment_index": self.segment_index,
             "created_at": _iso(self.created_at),
             "updated_at": _iso(self.updated_at),
