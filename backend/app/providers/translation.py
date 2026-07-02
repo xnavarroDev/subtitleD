@@ -1,49 +1,15 @@
 import json
 import os
-import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from flask import current_app, has_app_context
 
 from ..diagnostics import DiagnosticCheck, FAIL, PASS
+from .translation_languages import language_catalog, normalize_language as _normalize_language
 
 
-_LANGUAGE_CODES = {
-    "arabic": "ar",
-    "ar": "ar",
-    "chinese": "zh",
-    "zh": "zh",
-    "dutch": "nl",
-    "nl": "nl",
-    "english": "en",
-    "en": "en",
-    "french": "fr",
-    "fr": "fr",
-    "german": "de",
-    "de": "de",
-    "hindi": "hi",
-    "hi": "hi",
-    "italian": "it",
-    "it": "it",
-    "japanese": "ja",
-    "ja": "ja",
-    "korean": "ko",
-    "ko": "ko",
-    "portuguese": "pt",
-    "pt": "pt",
-    "russian": "ru",
-    "ru": "ru",
-    "spanish": "es",
-    "es": "es",
-}
-
-_LANGUAGE_CODE_PATTERN = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$")
-_MOCK_LANGUAGES = [
-    {"code": code, "name": name.title(), "targets": []}
-    for name, code in _LANGUAGE_CODES.items()
-    if name != code
-]
+_MOCK_LANGUAGES = language_catalog()
 
 
 class BaseTranslationProvider:
@@ -61,9 +27,18 @@ class BaseTranslationProvider:
         """Translate one subtitle segment while preserving segment timing."""
         raise NotImplementedError
 
+    def translate_with_metadata(self, text, source_language, target_language):
+        from .local_translation import TranslationOutput
+        return TranslationOutput(
+            self.translate(text, source_language, target_language),
+            getattr(self, "provider_name", self.__class__.__name__.casefold()),
+        )
+
 
 class MockTranslationProvider(BaseTranslationProvider):
     """Small visible mock translator for local development and demos."""
+
+    provider_name = "mock"
 
     _dictionaries = {
         "spanish": {
@@ -116,6 +91,8 @@ class MockTranslationProvider(BaseTranslationProvider):
 
 class LibreTranslateProvider(BaseTranslationProvider):
     """Translation provider backed by a LibreTranslate-compatible REST API."""
+
+    provider_name = "libretranslate"
 
     def __init__(self, base_url=None, api_key=None, timeout_seconds=None):
         self.base_url = (base_url or _setting("LIBRETRANSLATE_URL", "http://localhost:5001")).rstrip("/")
@@ -236,31 +213,101 @@ class LibreTranslateProvider(BaseTranslationProvider):
         return translated_text
 
 
+class RoutedTranslationProvider(BaseTranslationProvider):
+    """Choose a local translator from configurable source/target pair rules."""
+
+    provider_name = "routed-local"
+
+    def __init__(self, default_provider, overrides=None, providers=None):
+        self.default_provider = str(default_provider or "nllb-ct2").strip().lower()
+        self.overrides = overrides or {}
+        self.providers = providers or {}
+
+    def _provider(self, source_language=None, target_language=None):
+        source = normalize_language(source_language) or "auto"
+        target = normalize_language(target_language) or ""
+        name = self.overrides.get((source, target), self.default_provider)
+        if name not in self.providers:
+            self.providers[name] = _provider_by_name(name)
+        return self.providers[name]
+
+    def get_languages(self):
+        return self._provider().get_languages()
+
+    def check_ready(self, source_language=None, target_language=None):
+        return self._provider(source_language, target_language).check_ready(
+            source_language, target_language
+        )
+
+    def translate(self, text, source_language, target_language):
+        return self._provider(source_language, target_language).translate(
+            text, source_language, target_language
+        )
+
+    def translate_with_metadata(self, text, source_language, target_language):
+        provider = self._provider(source_language, target_language)
+        if hasattr(provider, "translate_with_metadata"):
+            return provider.translate_with_metadata(text, source_language, target_language)
+        return super().translate_with_metadata(text, source_language, target_language)
+
+
 def get_translation_provider():
     """Select the configured translation provider.
 
     This is the extension point for a real translation service once credentials
     and provider-specific settings are introduced.
     """
-    provider = str(_setting("TRANSLATION_PROVIDER", "libretranslate")).strip().lower()
+    provider = str(_setting("TRANSLATION_PROVIDER", "routed")).strip().lower()
+    if provider in {"routed", "auto", "local-routed"}:
+        return RoutedTranslationProvider(
+            _setting("TRANSLATION_DEFAULT_PROVIDER", "nllb-ct2"),
+            _parse_route_overrides(_setting("TRANSLATION_ROUTE_OVERRIDES", "")),
+        )
+    return _provider_by_name(provider)
+
+
+def _provider_by_name(provider):
+    provider = str(provider or "").strip().lower()
     if provider in {"", "mock"}:
         return MockTranslationProvider()
     if provider in {"libretranslate", "libre_translate", "libre-translate"}:
         return LibreTranslateProvider()
-    raise ValueError("Unknown TRANSLATION_PROVIDER. Use 'mock' or 'libretranslate'.")
+    if provider in {"nllb", "nllb-ct2", "local", "local-nllb"}:
+        from .local_translation import FallbackTranslationProvider, LocalNllbTranslationProvider
+        return FallbackTranslationProvider(
+            LocalNllbTranslationProvider(),
+            LibreTranslateProvider(),
+        )
+    raise ValueError(
+        "Unknown TRANSLATION_PROVIDER. Use 'routed', 'mock', 'libretranslate', or 'nllb-ct2'."
+    )
+
+
+def _parse_route_overrides(value):
+    output = {}
+    for item in str(value or "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            pair, provider = item.split("=", 1)
+            source, target = pair.split(">", 1)
+        except ValueError as exc:
+            raise ValueError(
+                "TRANSLATION_ROUTE_OVERRIDES must use source>target=provider entries."
+            ) from exc
+        source = normalize_language(source.strip()) or source.strip().lower()
+        target = normalize_language(target.strip()) or target.strip().lower()
+        provider = provider.strip().lower()
+        if provider not in {"nllb", "nllb-ct2", "local", "local-nllb", "libretranslate", "libre_translate", "libre-translate", "mock"}:
+            raise ValueError(f"Unknown routed translation provider: {provider}")
+        output[(source, target)] = provider
+    return output
 
 
 def normalize_language(language):
-    """Normalize common language labels to translation API language codes."""
-    if not language:
-        return None
-    normalized = str(language).strip().lower().replace("_", "-")
-    known_code = _LANGUAGE_CODES.get(normalized)
-    if known_code:
-        return known_code
-    if normalized == "auto" or _LANGUAGE_CODE_PATTERN.fullmatch(normalized):
-        return normalized
-    return None
+    """Normalize common language labels to application language codes."""
+    return _normalize_language(language)
 
 
 def _setting(name, default):

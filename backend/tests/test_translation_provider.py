@@ -8,6 +8,7 @@ from app.providers.translation import (
     LibreTranslateProvider,
     MockTranslationProvider,
     get_translation_provider,
+    RoutedTranslationProvider,
     normalize_language,
 )
 
@@ -42,11 +43,44 @@ def test_get_translation_provider_can_select_libretranslate(monkeypatch):
     assert isinstance(provider, LibreTranslateProvider)
 
 
+def test_get_translation_provider_can_select_local_nllb_with_fallback(monkeypatch):
+    from app.providers.local_translation import FallbackTranslationProvider
+
+    monkeypatch.setenv("TRANSLATION_PROVIDER", "nllb-ct2")
+
+    assert isinstance(get_translation_provider(), FallbackTranslationProvider)
+
+
 def test_get_translation_provider_rejects_unknown_provider(monkeypatch):
     monkeypatch.setenv("TRANSLATION_PROVIDER", "other")
 
     with pytest.raises(ValueError, match="Unknown TRANSLATION_PROVIDER"):
         get_translation_provider()
+
+
+def test_routed_provider_avoids_primary_for_configured_language_pair():
+    calls = []
+
+    class Provider:
+        def __init__(self, name): self.provider_name = name
+        def translate(self, text, source, target):
+            calls.append(self.provider_name)
+            return f"{self.provider_name}:{text}"
+        def get_languages(self): return []
+        def check_ready(self, *args): return None
+
+    routed = RoutedTranslationProvider(
+        "nllb-ct2",
+        {("ja", "en"): "libretranslate"},
+        {
+            "nllb-ct2": Provider("nllb-ct2"),
+            "libretranslate": Provider("libretranslate"),
+        },
+    )
+
+    assert routed.translate("source", "ja", "en") == "libretranslate:source"
+    assert routed.translate("source", "tl", "en") == "nllb-ct2:source"
+    assert calls == ["libretranslate", "nllb-ct2"]
 
 
 @pytest.mark.parametrize(

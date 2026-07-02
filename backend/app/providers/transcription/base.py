@@ -44,6 +44,9 @@ class TranscriptWord:
     end_time: float | None = None
     speaker_label: str | None = None
     confidence: float | None = None
+    timing_quality: str = "forced_aligned"
+    reconstruction_method: str = "raw"
+    source_was_reconstructed: bool = False
 
 
 @dataclass(frozen=True)
@@ -55,16 +58,17 @@ class TranscriptSegment:
     text: str
     speaker_label: str | None = None
     words: tuple[TranscriptWord, ...] = ()
+    timing_quality: str = "forced_aligned"
 
 
 class BaseTranscriptionProvider:
     """Interface for speech-to-text implementations."""
 
-    def check_ready(self, deep=False, load_models=False):
+    def check_ready(self, deep=False, load_models=False, diarize=None):
         """Return a provider-specific diagnostic readiness result."""
         raise NotImplementedError
 
-    def transcribe(self, audio_path, source_language, min_speakers=None, max_speakers=None):
+    def transcribe(self, audio_path, source_language, min_speakers=None, max_speakers=None, glossary=None, diarize=None):
         """Return ordered timestamped transcript segments for an audio file."""
         raise NotImplementedError
 

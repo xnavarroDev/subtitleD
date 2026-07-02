@@ -60,24 +60,37 @@ def test_segment_serializer_includes_speaker_label_and_confidence(app):
             translated_text="Hola",
             speaker_label="SPEAKER_00",
             transcription_confidence=0.87,
+            timing_quality="estimated",
+            translation_provider="nllb-ct2",
+            translation_model="facebook/nllb-200-distilled-600M",
+            source_reconstruction_method="speaker_fragment_merge",
+            source_was_reconstructed=True,
+            translation_unit_id="u000001-000004",
+            translation_confidence_warning="Review source",
             segment_index=0,
         )
 
         assert segment.to_dict()["speaker_label"] == "SPEAKER_00"
         assert segment.to_dict()["transcription_confidence"] == 0.87
+        assert segment.to_dict()["timing_quality"] == "estimated"
+        assert segment.to_dict()["translation_provider"] == "nllb-ct2"
+        assert segment.to_dict()["translation_model"] == "facebook/nllb-200-distilled-600M"
+        assert segment.to_dict()["source_was_reconstructed"] is True
+        assert segment.to_dict()["translation_unit_id"] == "u000001-000004"
+        assert segment.to_dict()["translation_confidence_warning"] == "Review source"
 
 
-def test_project_serializer_includes_contextual_translation_progress(app):
+def test_project_serializer_includes_translation_progress(app):
     with app.app_context():
         project = Project(
             title="Demo", source_language="en", target_language="es",
-            status=ProjectStatus.PROCESSING, processing_stage="contextual_translation",
+            status=ProjectStatus.PROCESSING, processing_stage="segmenting_and_translating",
             translation_completed_words=12, translation_total_words=30,
         )
 
         payload = project.to_dict()
 
-        assert payload["processing_stage"] == "contextual_translation"
+        assert payload["processing_stage"] == "segmenting_and_translating"
         assert payload["translation_progress"] == {"completed": 12, "total": 30}
 
 
@@ -96,6 +109,33 @@ def test_create_project_accepts_optional_speaker_hints(client):
     assert response.status_code == 201
     assert response.json["min_speakers"] == 2
     assert response.json["max_speakers"] == 3
+
+
+def test_create_project_accepts_glossary(client):
+    response = client.post("/api/projects", json={
+        "title": "Names", "source_language": "en", "target_language": "es",
+        "glossary": "Alonzo\nSubtitleD",
+    })
+
+    assert response.status_code == 201
+    assert response.json["glossary"] == "Alonzo\nSubtitleD"
+
+
+def test_create_project_defaults_expensive_features_off_and_accepts_opt_in(client):
+    default = client.post("/api/projects", json={
+        "title": "Fast", "source_language": "en", "target_language": "es",
+    })
+    enabled = client.post("/api/projects", json={
+        "title": "Detailed", "source_language": "en", "target_language": "es",
+        "detect_speakers": True,
+        "smooth_speaker_fragments": True,
+    })
+
+    assert default.status_code == 201
+    assert default.json["detect_speakers"] is False
+    assert default.json["smooth_speaker_fragments"] is False
+    assert enabled.json["detect_speakers"] is True
+    assert enabled.json["smooth_speaker_fragments"] is True
 
 
 def test_create_project_rejects_invalid_speaker_hint_range(client):

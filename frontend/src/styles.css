@@ -379,6 +379,16 @@ textarea {
   margin-top: -6px;
 }
 
+.translation-method { color: #687a75; font-size: 12px; }
+.timing-estimated { display: block; margin-top: 5px; color: #8a5700; font-size: 11px; }
+.source-reconstructed, .source-confidence-warning { display: block; margin-top: 6px; font-size: 11px; }
+.source-reconstructed { color: #246f5b; }
+.source-confidence-warning { color: #9a4e00; }
+.checkbox-option { display: flex !important; grid-template-columns: none !important; flex-direction: row !important; align-items: flex-start; gap: 10px !important; }
+.checkbox-option input { width: auto; margin-top: 3px; }
+.checkbox-option span { display: grid; gap: 3px; }
+.project-option-list { display: grid; gap: 10px; margin-top: 16px; }
+
 .table-wrap {
   overflow-x: auto;
 }

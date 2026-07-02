@@ -5,7 +5,7 @@ from werkzeug.exceptions import HTTPException
 
 from .diagnostics import PreflightError, require_job_preflight, run_system_diagnostics
 from .extensions import db
-from .models import Project, ProjectStatus, SubtitleSegment
+from .models import Project, ProjectStatus, SubtitleSegment, TranscriptWordRecord
 from .providers import get_translation_provider
 from .utils.files import save_video_upload
 from .utils.srt import generate_srt
@@ -30,6 +30,11 @@ def create_project():
         target_language=payload["target_language"].strip(),
         min_speakers=_parse_optional_int(payload.get("min_speakers"), "min_speakers"),
         max_speakers=_parse_optional_int(payload.get("max_speakers"), "max_speakers"),
+        glossary=str(payload.get("glossary") or "").strip() or None,
+        detect_speakers=_parse_bool_value(payload.get("detect_speakers", False)),
+        smooth_speaker_fragments=_parse_bool_value(
+            payload.get("smooth_speaker_fragments", False)
+        ),
         status=ProjectStatus.CREATED,
     )
     if project.min_speakers is not None and project.max_speakers is not None and project.min_speakers > project.max_speakers:
@@ -65,6 +70,22 @@ def diagnostics():
 @api_bp.get("/projects/<project_id>")
 def get_project(project_id):
     return jsonify(_project_or_404(project_id).to_dict(language_names=_translation_language_names()))
+
+
+@api_bp.patch("/projects/<project_id>")
+def update_project(project_id):
+    project = _project_or_404(project_id)
+    payload = request.get_json(silent=True) or {}
+    if "glossary" in payload:
+        project.glossary = str(payload.get("glossary") or "").strip() or None
+    if "detect_speakers" in payload:
+        project.detect_speakers = _parse_bool_value(payload["detect_speakers"])
+    if "smooth_speaker_fragments" in payload:
+        project.smooth_speaker_fragments = _parse_bool_value(
+            payload["smooth_speaker_fragments"]
+        )
+    db.session.commit()
+    return jsonify(project.to_dict(language_names=_translation_language_names()))
 
 
 @api_bp.delete("/projects/<project_id>")
@@ -107,7 +128,6 @@ def process_project(project_id):
         return jsonify({"error": str(exc), "diagnostics": exc.report.to_dict(include_details=False)}), 503
     from .tasks import process_video_task
 
-    _invalidate_project_outputs(project)
     project.status = ProjectStatus.PROCESSING
     project.processing_stage = "queued"
     project.processing_warning = None
@@ -124,6 +144,13 @@ def list_segments(project_id):
     _project_or_404(project_id)
     segments = SubtitleSegment.query.filter_by(project_id=project_id).order_by(SubtitleSegment.segment_index.asc()).all()
     return jsonify([segment.to_dict() for segment in segments])
+
+
+@api_bp.get("/projects/<project_id>/transcript/words")
+def list_transcript_words(project_id):
+    _project_or_404(project_id)
+    words = TranscriptWordRecord.query.filter_by(project_id=project_id).order_by(TranscriptWordRecord.word_index).all()
+    return jsonify([word.to_dict() for word in words])
 
 
 @api_bp.patch("/segments/<segment_id>")
@@ -257,6 +284,17 @@ def _parse_optional_int(value, field_name):
 
 def _parse_bool_query(value):
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_bool_value(value):
+    if isinstance(value, bool):
+        return value
+    normalized = str(value or "").strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"", "0", "false", "no", "off"}:
+        return False
+    abort(400, description="Boolean project options must be true or false")
 
 
 def _send_existing_file(path, as_attachment=False):

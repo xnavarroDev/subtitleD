@@ -19,6 +19,9 @@ export default function ProjectCreationPage() {
   const [targetLanguage, setTargetLanguage] = useState("");
   const [minSpeakers, setMinSpeakers] = useState("");
   const [maxSpeakers, setMaxSpeakers] = useState("");
+  const [glossary, setGlossary] = useState("");
+  const [detectSpeakers, setDetectSpeakers] = useState(false);
+  const [smoothSpeakerFragments, setSmoothSpeakerFragments] = useState(false);
   const [videoFile, setVideoFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [deletingProjectId, setDeletingProjectId] = useState(null);
@@ -49,12 +52,15 @@ export default function ProjectCreationPage() {
       const payload = {
         title,
         source_language: sourceLanguage,
-        target_language: targetLanguage
+        target_language: targetLanguage,
+        glossary,
+        detect_speakers: detectSpeakers,
+        smooth_speaker_fragments: detectSpeakers && smoothSpeakerFragments
       };
-      if (minSpeakers.trim()) {
+      if (detectSpeakers && minSpeakers.trim()) {
         payload.min_speakers = Number(minSpeakers);
       }
-      if (maxSpeakers.trim()) {
+      if (detectSpeakers && maxSpeakers.trim()) {
         payload.max_speakers = Number(maxSpeakers);
       }
 
@@ -144,6 +150,35 @@ export default function ProjectCreationPage() {
           </div>
 
           <label>
+            <span>Expected names and terms</span>
+            <textarea
+              value={glossary}
+              onChange={(event) => setGlossary(event.target.value)}
+              placeholder={"Alonzo\nSubtitleD\nKoboldCpp"}
+            />
+            <small>One term per line. WhisperX uses these as recognition hints.</small>
+          </label>
+
+          <label className="checkbox-option">
+            <input
+              type="checkbox"
+              checked={detectSpeakers}
+              onChange={(event) => setDetectSpeakers(event.target.checked)}
+            />
+            <span><strong>Detect speakers</strong><small>Runs Pyannote diarization and requires an authorized Hugging Face token.</small></span>
+          </label>
+
+          <label className="checkbox-option">
+            <input
+              type="checkbox"
+              checked={smoothSpeakerFragments}
+              disabled={!detectSpeakers}
+              onChange={(event) => setSmoothSpeakerFragments(event.target.checked)}
+            />
+            <span><strong>Smooth short speaker fragments</strong><small>Reassigns likely brief diarization glitches for cleaner captions. Leave off when short interjections must retain exact speaker labels.</small></span>
+          </label>
+
+          <label>
             <span>Video file</span>
             <input
               accept=".mp4,.mov,.webm,.mkv,video/mp4,video/quicktime,video/webm"
@@ -162,6 +197,7 @@ export default function ProjectCreationPage() {
                 value={minSpeakers}
                 onChange={(event) => setMinSpeakers(event.target.value)}
                 placeholder="Optional"
+                disabled={!detectSpeakers}
               />
             </label>
             <label>
@@ -172,6 +208,7 @@ export default function ProjectCreationPage() {
                 value={maxSpeakers}
                 onChange={(event) => setMaxSpeakers(event.target.value)}
                 placeholder="Optional"
+                disabled={!detectSpeakers}
               />
             </label>
           </div>

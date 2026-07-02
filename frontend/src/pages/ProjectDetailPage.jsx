@@ -77,7 +77,7 @@ export default function ProjectDetailPage() {
       {error ? <div className="notice error">{error}</div> : null}
       {project.error_message ? <div className="notice error">{project.error_message}</div> : null}
       {project.processing_warning ? <div className="notice warning">{project.processing_warning}</div> : null}
-      {project.status === "processing" ? (
+      {isActiveJob(project) ? (
         <div className="notice progress-notice">
           {stageLabel(project.processing_stage)}
           {progress.total ? ` — ${progress.completed} of ${progress.total} words` : ""}
@@ -100,7 +100,7 @@ export default function ProjectDetailPage() {
 
       <section className="detail-grid">
         <VideoPreview project={project} />
-        <ProjectMeta project={project} />
+        <ProjectMeta project={project} onProjectChange={loadProject} />
       </section>
       <SubtitleEditor projectId={project.id} enabled={canUseSegments} />
     </main>
@@ -116,7 +116,8 @@ function stageLabel(stage) {
     queued: "Queued for processing",
     extracting_audio: "Extracting audio",
     transcribing: "Transcribing with WhisperX",
-    contextual_translation: "Translating with sliding context"
+    loading_japanese_alignment: "Loading and applying Japanese forced alignment",
+    segmenting_and_translating: "Selecting deterministic caption timing and translating"
   };
   return labels[stage] || "Processing video";
 }

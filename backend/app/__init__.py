@@ -7,6 +7,7 @@ from sqlalchemy.exc import OperationalError
 
 from .config import Config
 from .diagnostics import register_diagnostics_cli
+from .local_translation_cli import register_local_translation_cli
 from .extensions import db, init_celery
 from .utils.files import ensure_storage_dirs
 
@@ -32,6 +33,7 @@ def create_app(config_object=Config):
 
     app.register_blueprint(api_bp)
     register_diagnostics_cli(app)
+    register_local_translation_cli(app)
 
     @app.get("/health")
     def health():
@@ -76,10 +78,25 @@ def _upgrade_dev_schema():
             "processing_warning": "VARCHAR(1000)",
             "translation_completed_words": "INTEGER DEFAULT 0",
             "translation_total_words": "INTEGER DEFAULT 0",
+            "glossary": "TEXT",
+            "detected_source_language": "VARCHAR(32)",
+            "detect_speakers": "BOOLEAN DEFAULT FALSE",
+            "smooth_speaker_fragments": "BOOLEAN DEFAULT FALSE",
         },
         "subtitle_segments": {
             "speaker_label": "VARCHAR(64)",
             "transcription_confidence": "FLOAT",
+            "translation_method": "VARCHAR(32) DEFAULT 'deterministic_timing'",
+            "timing_quality": "VARCHAR(32) DEFAULT 'forced_aligned'",
+            "translation_provider": "VARCHAR(64) DEFAULT 'unknown'",
+            "translation_model": "VARCHAR(255)",
+            "source_reconstruction_method": "VARCHAR(128) DEFAULT 'raw'",
+            "source_was_reconstructed": "BOOLEAN DEFAULT FALSE",
+            "translation_unit_id": "VARCHAR(64)",
+            "translation_confidence_warning": "VARCHAR(255)",
+        },
+        "transcript_words": {
+            "timing_quality": "VARCHAR(32) DEFAULT 'forced_aligned'",
         },
     }
 

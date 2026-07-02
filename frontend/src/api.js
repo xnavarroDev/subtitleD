@@ -10,8 +10,12 @@
  * @property {string|null} processing_stage
  * @property {string|null} processing_warning
  * @property {{completed:number,total:number}} translation_progress
+ * @property {string} glossary
+ * @property {boolean} detect_speakers
+ * @property {boolean} smooth_speaker_fragments
  * @property {string} source_language
  * @property {string} target_language
+ * @property {string|null} detected_source_language
  * @property {string} source_language_name
  * @property {string} target_language_name
  * @property {number|null} min_speakers
@@ -35,6 +39,14 @@
  * @property {string} translated_text
  * @property {string|null} speaker_label
  * @property {number|null} transcription_confidence
+ * @property {string} translation_method
+ * @property {string} timing_quality
+ * @property {string} translation_provider
+ * @property {string|null} translation_model
+ * @property {string} source_reconstruction_method
+ * @property {boolean} source_was_reconstructed
+ * @property {string|null} translation_unit_id
+ * @property {string|null} translation_confidence_warning
  * @property {number} segment_index
  * @property {string} created_at
  * @property {string} updated_at
@@ -131,6 +143,14 @@ export function listLanguages() {
 /** Load project metadata, including status and media URLs. */
 export function getProject(projectId) {
   return apiRequest(`/projects/${projectId}`);
+}
+
+/** Update processing options that can be changed before reprocessing. */
+export function updateProject(projectId, payload) {
+  return apiRequest(`/projects/${projectId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
 }
 
 /** Upload a source video using the API's multipart `video` form field. */

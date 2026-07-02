@@ -5,8 +5,13 @@ from ..providers.transcription import TranscriptSegment, TranscriptWord
 
 
 _ENDING = re.compile(r"[.!?;:][\"')\]]*$")
-_NO_SPACE_BEFORE = re.compile(r"\s+([,.;:!?%)}\]])")
-_NO_SPACE_AFTER = re.compile(r"([({\[])\s+")
+_NO_SPACE_BEFORE = re.compile(r"\s+([,.;:!?%)}\]、。！？；：」』）】])")
+_NO_SPACE_AFTER = re.compile(r"([({\[「『（【])\s+")
+_CJK_CHARACTER = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]")
+_SPACE_BETWEEN_CJK = re.compile(
+    r"(?<=[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff])\s+"
+    r"(?=[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff])"
+)
 
 
 @dataclass(frozen=True)
@@ -20,7 +25,8 @@ class PreparedCaption:
 
 def normalize_caption_text(text):
     value = " ".join(str(text or "").replace("\n", " ").split())
-    return _NO_SPACE_AFTER.sub(r"\1", _NO_SPACE_BEFORE.sub(r"\1", value)).strip()
+    value = _NO_SPACE_AFTER.sub(r"\1", _NO_SPACE_BEFORE.sub(r"\1", value))
+    return _SPACE_BETWEEN_CJK.sub("", value).strip()
 
 
 def segment_transcript(segments, max_duration=6, max_chars=84, pause_seconds=0.65):
@@ -97,17 +103,32 @@ def wrap_caption_text(text, line_chars=42):
 def _timed_words(segment):
     raw = [word for word in (segment.words or ()) if word.text.strip()]
     if raw and all(word.start_time is not None and word.end_time is not None for word in raw):
-        return [TranscriptWord(word.text, float(word.start_time), float(word.end_time), word.speaker_label or segment.speaker_label, word.confidence) for word in raw]
-    tokens = [word.text for word in raw] if raw else str(segment.text).split()
+        return [TranscriptWord(
+            word.text, float(word.start_time), float(word.end_time),
+            word.speaker_label or segment.speaker_label, word.confidence,
+            word.timing_quality,
+        ) for word in raw]
+    tokens = [word.text for word in raw] if raw else _fallback_tokens(segment.text)
     speakers = [word.speaker_label or segment.speaker_label for word in raw] if raw else [segment.speaker_label] * len(tokens)
     weights = [max(len(token), 1) for token in tokens]
     total, duration, cursor = sum(weights), max(segment.end_time - segment.start_time, 0.001), segment.start_time
     output = []
     for index, (token, speaker, weight) in enumerate(zip(tokens, speakers, weights)):
         end = segment.end_time if index == len(tokens) - 1 else cursor + duration * weight / total
-        output.append(TranscriptWord(token, cursor, max(end, cursor + 0.001), speaker))
+        output.append(TranscriptWord(
+            token, cursor, max(end, cursor + 0.001), speaker, None, "estimated"
+        ))
         cursor = end
     return output
+
+
+def _fallback_tokens(text):
+    """Create useful proportional timing units when alignment has no words."""
+    value = str(text or "").strip()
+    whitespace_tokens = value.split()
+    if len(whitespace_tokens) > 1 or not _CJK_CHARACTER.search(value):
+        return whitespace_tokens
+    return [character for character in value if not character.isspace()]
 
 
 def _required_groups(words, pause_seconds):
@@ -146,9 +167,27 @@ def _split_group(words, max_duration, max_chars, pause_seconds):
             piece_duration = (chunk[0].end_time - chunk[0].start_time) / len(pieces)
             for i, piece in enumerate(pieces):
                 piece_start = chunk[0].start_time + i * piece_duration
-                output.append(TranscriptSegment(piece_start, chunk[0].end_time if i == len(pieces)-1 else piece_start + piece_duration, piece, chunk[0].speaker_label))
+                output.append(TranscriptSegment(
+                    piece_start,
+                    chunk[0].end_time if i == len(pieces)-1 else piece_start + piece_duration,
+                    piece,
+                    chunk[0].speaker_label,
+                    timing_quality=chunk[0].timing_quality,
+                ))
         else:
-            output.append(TranscriptSegment(chunk[0].start_time, chunk[-1].end_time, _join(chunk), _speaker(chunk), tuple(chunk)))
+            timing_quality = (
+                "estimated"
+                if any(word.timing_quality == "estimated" for word in chunk)
+                else "forced_aligned"
+            )
+            output.append(TranscriptSegment(
+                chunk[0].start_time,
+                chunk[-1].end_time,
+                _join(chunk),
+                _speaker(chunk),
+                tuple(chunk),
+                timing_quality,
+            ))
         start = split_at
     return output
 

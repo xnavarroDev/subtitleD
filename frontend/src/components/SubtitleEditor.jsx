@@ -57,7 +57,7 @@ export default function SubtitleEditor({ projectId, enabled }) {
         <div><p className="eyebrow">Subtitles</p><h2>Transcript and Translation</h2></div>
         <button onClick={loadSegments} disabled={!enabled}>Refresh</button>
       </div>
-      <p className="editor-help">The transcript is the untouched WhisperX result. The translation and caption boundaries are produced with sliding-window context.</p>
+      <p className="editor-help">The transcript preserves WhisperX output. Sliding-window context chooses timing, while the configured local model translates complete source units.</p>
       {error ? <div className="notice error">{error}</div> : null}
       {!enabled ? <div className="empty-state">Process the video to create subtitle segments.</div> : !segments.length ? <div className="empty-state">No segments found.</div> : (
         <div className="table-wrap"><table>
@@ -68,9 +68,9 @@ export default function SubtitleEditor({ projectId, enabled }) {
               <td><input className="time-input" value={draft?.start_time ?? ""} onChange={(event) => updateDraft(segment.id, { start_time: event.target.value })} /></td>
               <td><input className="time-input" value={draft?.end_time ?? ""} onChange={(event) => updateDraft(segment.id, { end_time: event.target.value })} /></td>
               {showSpeakers ? <td><input className="speaker-input" value={draft?.speaker_label ?? ""} onChange={(event) => updateDraft(segment.id, { speaker_label: event.target.value })} /></td> : null}
-              {showConfidence ? <td><span className={`confidence ${confidenceClass(segment.transcription_confidence)}`}>{formatConfidence(segment.transcription_confidence)}</span></td> : null}
-              <td className="original-text">{segment.original_text}</td>
-              <td><textarea value={draft?.translated_text ?? ""} onChange={(event) => updateDraft(segment.id, { translated_text: event.target.value })} /></td>
+              {showConfidence ? <td><span className={`confidence ${confidenceClass(segment.transcription_confidence)}`}>{formatConfidence(segment.transcription_confidence)}</span>{segment.timing_quality === "estimated" ? <small className="timing-estimated">Estimated timing</small> : null}</td> : null}
+              <td className="original-text">{segment.original_text}{segment.source_was_reconstructed ? <small className="source-reconstructed">Source fragments reconstructed for translation</small> : null}{segment.translation_confidence_warning ? <small className="source-confidence-warning">{segment.translation_confidence_warning}</small> : null}</td>
+              <td><textarea value={draft?.translated_text ?? ""} onChange={(event) => updateDraft(segment.id, { translated_text: event.target.value })} /><small className="translation-method">{providerLabel(segment)} · {methodLabel(segment.translation_method)}</small></td>
               <td><button disabled={saving === segment.id} onClick={() => save(segment.id)}>{saving === segment.id ? "Saving..." : "Save"}</button></td>
             </tr>;
           })}</tbody>
@@ -89,4 +89,30 @@ function confidenceClass(value) {
   if (value < 0.55) return "low";
   if (value < 0.75) return "medium";
   return "high";
+}
+
+function methodLabel(value) {
+  const labels = {
+    contextual_timing: "Legacy AI timing",
+    contextual_timing_unit: "Legacy AI timing · semantic unit",
+    contextual_timing_resized: "Legacy AI timing · resized",
+    deterministic_timing: "Deterministic timing",
+    deterministic_timing_unit: "Deterministic timing · semantic unit",
+    deterministic_timing_resized: "Deterministic timing · resized",
+    contextual: "Legacy contextual LLM",
+    contextual_split: "Legacy contextual LLM · split",
+    fallback: "Legacy deterministic fallback"
+  };
+  return labels[value] || value || "Translation";
+}
+
+function providerLabel(segment) {
+  const labels = {
+    "nllb-ct2": "NLLB local",
+    libretranslate: "LibreTranslate fallback",
+    identity: "Same-language copy",
+    mock: "Mock translator"
+  };
+  const provider = labels[segment.translation_provider] || segment.translation_provider || "Local translator";
+  return segment.translation_model ? `${provider} (${segment.translation_model})` : provider;
 }

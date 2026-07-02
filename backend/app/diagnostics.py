@@ -109,7 +109,6 @@ def run_system_diagnostics(deep=False, refresh=False, load_models=False):
         check_ffmpeg(require_subtitles=True),
         transcription_check,
         check_translation_provider(),
-        check_contextual_translation_provider(),
     )
     mode = "model_load" if load_models else ("deep" if deep else "quick")
     return DiagnosticReport(mode=mode, checks=checks, cached=cached)
@@ -129,22 +128,21 @@ def run_job_preflight(job_type, project, include_worker=True):
     checks.append(check_project_file(source_path, "source_video"))
 
     if job_type == "process":
-        checks.extend(
-            [
-                check_ffmpeg(require_subtitles=False),
-                check_transcription_provider(deep=False),
-                check_translation_provider(
-                    source_language=getattr(project, "source_language", None),
-                    target_language=getattr(project, "target_language", None),
-                ),
-            ]
-        )
+        checks.extend([
+            check_ffmpeg(require_subtitles=False),
+            check_transcription_provider(
+                deep=False, diarize=bool(getattr(project, "detect_speakers", False))
+            ),
+        ])
         from .providers.translation import normalize_language
 
         source = normalize_language(getattr(project, "source_language", None))
         target = normalize_language(getattr(project, "target_language", None))
         if source == "auto" or source != target:
-            checks.append(check_contextual_translation_provider())
+            checks.append(check_translation_provider(
+                source_language=getattr(project, "source_language", None),
+                target_language=getattr(project, "target_language", None),
+            ))
     elif job_type == "render":
         checks.extend(
             [
@@ -361,12 +359,14 @@ def check_ffmpeg(require_subtitles=False):
     )
 
 
-def check_transcription_provider(deep=False, load_models=False):
+def check_transcription_provider(deep=False, load_models=False, diarize=None):
     try:
         from .providers import get_transcription_provider
 
         provider = get_transcription_provider()
-        return provider.check_ready(deep=deep, load_models=load_models)
+        return provider.check_ready(
+            deep=deep, load_models=load_models, diarize=diarize
+        )
     except Exception as exc:
         return DiagnosticCheck(
             "transcription",
@@ -389,23 +389,6 @@ def check_translation_provider(source_language=None, target_language=None):
             "translation",
             FAIL,
             _safe_error_message(exc, "Translation provider readiness check failed."),
-        )
-
-
-def check_contextual_translation_provider(required=False):
-    try:
-        from .providers import get_contextual_translation_provider
-
-        result = get_contextual_translation_provider().check_ready()
-        if required and result.status != PASS:
-            return DiagnosticCheck(result.name, FAIL, result.message, result.details)
-        if result.status == FAIL:
-            return DiagnosticCheck(result.name, WARN, result.message, result.details)
-        return result
-    except Exception as exc:
-        return DiagnosticCheck(
-            "contextual_translation", WARN,
-            _safe_error_message(exc, "Contextual translation readiness check failed."),
         )
 
 
