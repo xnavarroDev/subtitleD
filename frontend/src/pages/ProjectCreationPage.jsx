@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   createProject,
   deleteProject,
+  getTranslationSettings,
   listLanguages,
   listProjects,
   uploadProjectVideo
@@ -20,6 +21,17 @@ export default function ProjectCreationPage() {
   const [targetLanguage, setTargetLanguage] = useState("");
   const [minSpeakers, setMinSpeakers] = useState("");
   const [maxSpeakers, setMaxSpeakers] = useState("");
+  const [glossary, setGlossary] = useState("");
+  const [detectSpeakers, setDetectSpeakers] = useState(false);
+  const [smoothSpeakerFragments, setSmoothSpeakerFragments] = useState(false);
+  const [translationSettings, setTranslationSettings] = useState({
+    temperature: "0.7",
+    top_p: "0.6",
+    top_k: "20",
+    repetition_penalty: "1.05",
+    max_tokens: "256",
+    context_captions: "2"
+  });
   const [videoFile, setVideoFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [deletingProjectId, setDeletingProjectId] = useState(null);
@@ -35,6 +47,16 @@ export default function ProjectCreationPage() {
         setTargetLanguage(codes.has("es") ? "es" : availableLanguages[1]?.code || "");
       })
       .catch(() => setError("Could not load the translation provider's languages."));
+    getTranslationSettings()
+      .then((settings) => setTranslationSettings({
+        temperature: String(settings.temperature),
+        top_p: String(settings.top_p),
+        top_k: String(settings.top_k),
+        repetition_penalty: String(settings.repetition_penalty),
+        max_tokens: String(settings.max_tokens),
+        context_captions: String(settings.context_captions)
+      }))
+      .catch(() => undefined);
   }, []);
 
   async function handleSubmit(event) {
@@ -50,12 +72,23 @@ export default function ProjectCreationPage() {
       const payload = {
         title,
         source_language: sourceLanguage,
-        target_language: targetLanguage
+        target_language: targetLanguage,
+        glossary,
+        detect_speakers: detectSpeakers,
+        smooth_speaker_fragments: detectSpeakers && smoothSpeakerFragments,
+        translation_settings: {
+          temperature: Number(translationSettings.temperature),
+          top_p: Number(translationSettings.top_p),
+          top_k: Number(translationSettings.top_k),
+          repetition_penalty: Number(translationSettings.repetition_penalty),
+          max_tokens: Number(translationSettings.max_tokens),
+          context_captions: Number(translationSettings.context_captions)
+        }
       };
-      if (minSpeakers.trim()) {
+      if (detectSpeakers && minSpeakers.trim()) {
         payload.min_speakers = Number(minSpeakers);
       }
-      if (maxSpeakers.trim()) {
+      if (detectSpeakers && maxSpeakers.trim()) {
         payload.max_speakers = Number(maxSpeakers);
       }
 
@@ -145,6 +178,52 @@ export default function ProjectCreationPage() {
           </div>
 
           <label>
+            <span>Expected names and terms</span>
+            <textarea
+              value={glossary}
+              onChange={(event) => setGlossary(event.target.value)}
+              placeholder={"Alonzo\nSubtitleD\nKoboldCpp"}
+            />
+            <small>One term per line. WhisperX uses these as recognition hints.</small>
+          </label>
+
+          <label className="checkbox-option">
+            <input
+              type="checkbox"
+              checked={detectSpeakers}
+              onChange={(event) => setDetectSpeakers(event.target.checked)}
+            />
+            <span><strong>Detect speakers</strong><small>Runs Pyannote diarization and requires an authorized Hugging Face token.</small></span>
+          </label>
+
+          <details className="advanced-settings">
+            <summary>HY-MT2 translation settings</summary>
+            <small>These values are sent with each KoboldCpp translation request.</small>
+            <div className="form-row">
+              <TranslationSetting label="Temperature" name="temperature" min="0" max="2" step="0.05" values={translationSettings} setValues={setTranslationSettings} />
+              <TranslationSetting label="Top-p" name="top_p" min="0.01" max="1" step="0.01" values={translationSettings} setValues={setTranslationSettings} />
+            </div>
+            <div className="form-row">
+              <TranslationSetting label="Top-k" name="top_k" min="0" max="500" step="1" values={translationSettings} setValues={setTranslationSettings} />
+              <TranslationSetting label="Repetition penalty" name="repetition_penalty" min="0.5" max="2" step="0.01" values={translationSettings} setValues={setTranslationSettings} />
+            </div>
+            <div className="form-row">
+              <TranslationSetting label="Maximum output tokens" name="max_tokens" min="16" max="2048" step="1" values={translationSettings} setValues={setTranslationSettings} />
+              <TranslationSetting label="Context captions" name="context_captions" min="0" max="5" step="1" values={translationSettings} setValues={setTranslationSettings} />
+            </div>
+          </details>
+
+          <label className="checkbox-option">
+            <input
+              type="checkbox"
+              checked={smoothSpeakerFragments}
+              disabled={!detectSpeakers}
+              onChange={(event) => setSmoothSpeakerFragments(event.target.checked)}
+            />
+            <span><strong>Smooth short speaker fragments</strong><small>Reassigns likely brief diarization glitches for cleaner captions. Leave off when short interjections must retain exact speaker labels.</small></span>
+          </label>
+
+          <label>
             <span>Video file</span>
             <input
               accept=".mp4,.mov,.webm,.mkv,video/mp4,video/quicktime,video/webm"
@@ -163,6 +242,7 @@ export default function ProjectCreationPage() {
                 value={minSpeakers}
                 onChange={(event) => setMinSpeakers(event.target.value)}
                 placeholder="Optional"
+                disabled={!detectSpeakers}
               />
             </label>
             <label>
@@ -173,6 +253,7 @@ export default function ProjectCreationPage() {
                 value={maxSpeakers}
                 onChange={(event) => setMaxSpeakers(event.target.value)}
                 placeholder="Optional"
+                disabled={!detectSpeakers}
               />
             </label>
           </div>
@@ -234,5 +315,24 @@ export default function ProjectCreationPage() {
         </section>
       </section>
     </main>
+  );
+}
+
+function TranslationSetting({ label, name, min, max, step, values, setValues }) {
+  return (
+    <label>
+      <span>{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={values[name]}
+        onChange={(event) => setValues((current) => ({
+          ...current,
+          [name]: event.target.value
+        }))}
+      />
+    </label>
   );
 }

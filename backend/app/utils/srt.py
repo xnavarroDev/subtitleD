@@ -1,6 +1,8 @@
 from pathlib import Path
 from uuid import uuid4
 
+from .captions import wrap_caption_text
+
 
 def format_srt_timestamp(seconds):
     """Convert seconds to the `HH:MM:SS,mmm` timestamp format required by SRT."""
@@ -18,7 +20,7 @@ def _segment_value(segment, name):
     return getattr(segment, name)
 
 
-def segments_to_srt(segments):
+def segments_to_srt(segments, line_chars=42):
     """Render ordered subtitle segments into SRT text."""
     blocks = []
     for index, segment in enumerate(segments, start=1):
@@ -30,6 +32,7 @@ def segments_to_srt(segments):
         text = translated_text.strip() or original_text.strip()
         if speaker_label:
             text = f"[{speaker_label}] {text}"
+        text = wrap_caption_text(text, line_chars)
         blocks.append(
             "\n".join(
                 [
@@ -62,7 +65,7 @@ def generate_srt(project_id, output_path=None):
 
     path = Path(output_path) if output_path else _default_srt_path(project.id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(segments_to_srt(segments), encoding="utf-8")
+    path.write_text(segments_to_srt(segments, current_app.config.get("CAPTION_LINE_CHARS", 42)), encoding="utf-8")
     return path
 
 

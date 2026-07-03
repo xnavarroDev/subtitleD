@@ -128,16 +128,21 @@ def run_job_preflight(job_type, project, include_worker=True):
     checks.append(check_project_file(source_path, "source_video"))
 
     if job_type == "process":
-        checks.extend(
-            [
-                check_ffmpeg(require_subtitles=False),
-                check_transcription_provider(deep=False),
-                check_translation_provider(
-                    source_language=getattr(project, "source_language", None),
-                    target_language=getattr(project, "target_language", None),
-                ),
-            ]
-        )
+        checks.extend([
+            check_ffmpeg(require_subtitles=False),
+            check_transcription_provider(
+                deep=False, diarize=bool(getattr(project, "detect_speakers", False))
+            ),
+        ])
+        from .providers.translation import normalize_language
+
+        source = normalize_language(getattr(project, "source_language", None))
+        target = normalize_language(getattr(project, "target_language", None))
+        if source == "auto" or source != target:
+            checks.append(check_translation_provider(
+                source_language=getattr(project, "source_language", None),
+                target_language=getattr(project, "target_language", None),
+            ))
     elif job_type == "render":
         checks.extend(
             [
@@ -354,12 +359,14 @@ def check_ffmpeg(require_subtitles=False):
     )
 
 
-def check_transcription_provider(deep=False, load_models=False):
+def check_transcription_provider(deep=False, load_models=False, diarize=None):
     try:
         from .providers import get_transcription_provider
 
         provider = get_transcription_provider()
-        return provider.check_ready(deep=deep, load_models=load_models)
+        return provider.check_ready(
+            deep=deep, load_models=load_models, diarize=diarize
+        )
     except Exception as exc:
         return DiagnosticCheck(
             "transcription",

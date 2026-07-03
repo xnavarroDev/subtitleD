@@ -23,3 +23,9 @@
   color: #172026;
   text-align: right;
 }
+
+.project-option-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}

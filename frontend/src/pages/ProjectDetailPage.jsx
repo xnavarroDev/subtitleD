@@ -22,42 +22,22 @@ export default function ProjectDetailPage() {
   const [busyAction, setBusyAction] = useState(null);
 
   const loadProject = useCallback(async () => {
-    if (!projectId) {
-      return;
-    }
-    const nextProject = await getProject(projectId);
-    setProject(nextProject);
+    if (projectId) setProject(await getProject(projectId));
   }, [projectId]);
 
   useEffect(() => {
-    loadProject().catch((caught) =>
-      setError(caught instanceof Error ? caught.message : "Project load failed.")
-    );
+    loadProject().catch((caught) => setError(caught instanceof Error ? caught.message : "Project load failed."));
   }, [loadProject]);
 
   useEffect(() => {
-    if (!projectId || !project || !isActiveJob(project.status)) {
-      return;
-    }
-
+    if (!projectId || !project || !isActiveJob(project)) return undefined;
     const intervalId = window.setInterval(async () => {
       try {
         const status = await getProjectStatus(projectId);
-        setProject((current) =>
-          current
-            ? {
-                ...current,
-                status: status.status,
-                error_message: status.error_message,
-                updated_at: status.updated_at
-              }
-            : current
-        );
-        if (!isActiveJob(status.status)) {
-          await loadProject();
-        }
+        setProject((current) => current ? { ...current, ...status } : current);
+        if (!isActiveJob(status)) await loadProject();
       } catch {
-        // Leave the current project visible while the next tick retries.
+        // Keep the current project visible while polling retries.
       }
     }, 2000);
     return () => window.clearInterval(intervalId);
@@ -76,19 +56,11 @@ export default function ProjectDetailPage() {
     }
   }
 
-  if (!projectId) {
-    return null;
-  }
-
-  if (!project) {
-    return (
-      <main className="page-shell">
-        <div className="panel empty-state">Loading project...</div>
-      </main>
-    );
-  }
+  if (!projectId) return null;
+  if (!project) return <main className="page-shell"><div className="panel empty-state">Loading project...</div></main>;
 
   const canUseSegments = project.status === "processed" || project.status === "rendered";
+  const progress = project.translation_progress || { completed: 0, total: 0 };
   const downloadUrl = absoluteFileUrl(project.download_url);
   const srtUrl = absoluteFileUrl(project.srt_download_url);
 
@@ -96,62 +68,57 @@ export default function ProjectDetailPage() {
     <main className="page-shell">
       <section className="detail-header">
         <div>
-          <Link className="back-link" to="/">
-            Back to projects
-          </Link>
+          <Link className="back-link" to="/">Back to projects</Link>
           <h1>{project.title}</h1>
-          <p>
-            {project.source_language_name || project.source_language} to{" "}
-            {project.target_language_name || project.target_language}
-          </p>
+          <p>{project.source_language_name || project.source_language} to {project.target_language_name || project.target_language}</p>
         </div>
         <StatusPill status={project.status} />
       </section>
 
       {error ? <div className="notice error">{error}</div> : null}
       {project.error_message ? <div className="notice error">{project.error_message}</div> : null}
+      {project.processing_warning ? <div className="notice warning">{project.processing_warning}</div> : null}
+      {isActiveJob(project) ? (
+        <div className="notice progress-notice">
+          {stageLabel(project.processing_stage)}
+          {progress.total ? ` — ${progress.completed} of ${progress.total} words` : ""}
+        </div>
+      ) : null}
 
       <section className="actions-bar">
-        <button
-          onClick={() => runAction("Process video", () => processProject(project.id))}
-          disabled={!project.source_video_url || isActiveJob(project.status) || busyAction !== null}
-        >
+        <button onClick={() => runAction("Process video", () => processProject(project.id))} disabled={!project.source_video_url || isActiveJob(project) || busyAction !== null}>
           {busyAction === "Process video" ? "Starting..." : "Process Video"}
         </button>
-        <button
-          onClick={() => runAction("Export SRT", () => exportProjectSrt(project.id))}
-          disabled={!canUseSegments || isActiveJob(project.status) || busyAction !== null}
-        >
+        <button onClick={() => runAction("Export SRT", () => exportProjectSrt(project.id))} disabled={!canUseSegments || isActiveJob(project) || busyAction !== null}>
           {busyAction === "Export SRT" ? "Exporting..." : "Export SRT"}
         </button>
-        <button
-          onClick={() => runAction("Render video", () => renderProject(project.id))}
-          disabled={!canUseSegments || isActiveJob(project.status) || busyAction !== null}
-        >
+        <button onClick={() => runAction("Render video", () => renderProject(project.id))} disabled={!canUseSegments || isActiveJob(project) || busyAction !== null}>
           {busyAction === "Render video" ? "Starting..." : "Render Subtitled Video"}
         </button>
-        {srtUrl ? (
-          <a className="button-link" href={srtUrl}>
-            Download SRT
-          </a>
-        ) : null}
-        {downloadUrl ? (
-          <a className="button-link primary" href={downloadUrl}>
-            Download MP4
-          </a>
-        ) : null}
+        {srtUrl ? <a className="button-link" href={srtUrl}>Download SRT</a> : null}
+        {downloadUrl ? <a className="button-link primary" href={downloadUrl}>Download MP4</a> : null}
       </section>
 
       <section className="detail-grid">
         <VideoPreview project={project} />
-        <ProjectMeta project={project} />
+        <ProjectMeta project={project} onProjectChange={loadProject} />
       </section>
-
       <SubtitleEditor projectId={project.id} enabled={canUseSegments} />
     </main>
   );
 }
 
-function isActiveJob(status) {
-  return status === "processing" || status === "rendering";
+function isActiveJob(project) {
+  return project?.status === "processing" || project?.status === "rendering";
+}
+
+function stageLabel(stage) {
+  const labels = {
+    queued: "Queued for processing",
+    extracting_audio: "Extracting audio",
+    transcribing: "Transcribing with WhisperX",
+    loading_japanese_alignment: "Loading and applying Japanese forced alignment",
+    segmenting_and_translating: "Selecting deterministic caption timing and translating"
+  };
+  return labels[stage] || "Processing video";
 }

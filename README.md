@@ -1,6 +1,6 @@
 # SubtitleD
 
-SubtitleD is an MVP subtitle translation web app. It lets you create a project, upload a video, run a background processing job that extracts audio, creates aligned WhisperX transcript segments, translates them, edit the translated subtitles, export SRT, burn subtitles into the video with FFmpeg, and download the rendered MP4.
+SubtitleD is an MVP subtitle translation web app. It extracts aligned WhisperX words, uses deterministic readable caption boundaries, translates semantic units with HY-MT2 through local KoboldCpp, keeps the raw transcript visible for auditing, and produces editable subtitles, SRT exports, and rendered video. NLLB and LibreTranslate remain local fallbacks.
 
 ## Tech Stack
 
@@ -26,7 +26,24 @@ SubtitleD is an MVP subtitle translation web app. It lets you create a project, 
    docker compose up --build
    ```
 
-3. Open the app:
+3. Load `tencent/Hy-MT2-7B-GGUF` in a current KoboldCpp build on host port
+   `5002`. The Q4_K_M and Q6_K variants are practical local defaults. SubtitleD
+   sends translation prompts and per-project sampling settings to its
+   OpenAI-compatible `/v1/chat/completions` endpoint.
+
+4. Install the local NLLB fallback explicitly. This downloads and
+   converts the pinned 600M checkpoint to CTranslate2 INT8 and stores it in the
+   persistent model directory:
+
+   ```bash
+   docker compose exec backend flask --app run setup-local-translation
+   docker compose restart worker
+   ```
+
+   Until this is run, SubtitleD remains usable through its local
+   LibreTranslate fallback and displays a readiness warning.
+
+5. Open the app:
 
    - Frontend: http://localhost:5173
    - Backend health check: http://localhost:5000/health
@@ -56,8 +73,8 @@ In PowerShell, set that environment variable with `$env:HF_TOKEN=...` before run
 
 ### Hugging Face Token For Diarization
 
-Speaker diarization uses gated pyannote models from Hugging Face. When
-`WHISPERX_DIARIZE=true`, which is the default, `HF_TOKEN` must be a Hugging Face
+Speaker diarization uses gated pyannote models from Hugging Face. When a project
+enables speaker detection, `HF_TOKEN` must be a Hugging Face
 User Access Token with read access. A standard `read` token is enough for local
 development; a fine-grained token also works if it can read the required pyannote
 model repositories. A `write` token is not needed.
@@ -136,21 +153,49 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `CORS_ORIGINS`: Comma-separated frontend origins allowed by Flask
 - `VITE_API_BASE_URL`: Frontend API base URL
 - `WHISPER_MODEL_SIZE`: WhisperX model size, such as `tiny`, `base`, or `small`
+- `ASR_QUALITY_PRESET`: `fast`, `balanced`, `accurate`, or `gpu-accurate`; used when `WHISPER_MODEL_SIZE` is not explicitly set
 - `WHISPER_DEVICE`: Whisper runtime device, default `cpu`
 - `WHISPER_COMPUTE_TYPE`: Whisper compute type, default `int8`
 - `WHISPER_MODEL_DIR`: Persistent model download/cache directory
 - `WHISPERX_BATCH_SIZE`: WhisperX transcription batch size, default `16`
-- `WHISPERX_DIARIZE`: Whether WhisperX should run speaker diarization, default `true`
+- `WHISPERX_DIARIZE`: Legacy/global WhisperX diarization default; projects now opt in and default to `false`
+- `WHISPER_MODEL_CACHE_SIZE`: Maximum full Whisper models retained by a worker, default `1`
+- `WHISPERX_JA_ALIGN_MODEL`: Japanese CTC alignment model repository
+- `WHISPERX_JA_ALIGN_REVISION`: Pinned Japanese model revision containing Safetensors weights
+- `WHISPERX_JA_REQUIRE_SAFETENSORS`: Refuse legacy pickle weights for Japanese alignment, default `true`
+- `WHISPERX_ALIGNMENT_FAILURE_MODE`: `fallback` uses estimated timing if the Japanese model cannot load; `fail` stops processing
 - `HF_HOME`: Persistent Hugging Face cache directory, default `/app/storage/models/huggingface`
 - `TORCH_HOME`: Persistent PyTorch cache directory, default `/app/storage/models/torch`
 - `XDG_CACHE_HOME`: Persistent cache directory, default `/app/storage/models/cache`
 - `HF_TOKEN`: Hugging Face `read` token used by WhisperX diarization; the token account must have accepted the pyannote model conditions
-- `TRANSLATION_PROVIDER`: `mock` or `libretranslate`
+- `TRANSLATION_PROVIDER`: `routed` (recommended), `nllb-ct2`, `libretranslate`, or `mock`
+- `TRANSLATION_DEFAULT_PROVIDER`: Provider used when no language-pair route matches
+- `TRANSLATION_ROUTE_OVERRIDES`: Optional comma-separated routes such as `ja>en=libretranslate`
 - `LIBRETRANSLATE_URL`: LibreTranslate API base URL, default Docker service URL
 - `LIBRETRANSLATE_API_KEY`: Optional API key for protected LibreTranslate instances
 - `LIBRETRANSLATE_UPDATE_MODELS`: Whether LibreTranslate should download missing models
 - `LIBRETRANSLATE_START_PERIOD`: Health-check grace period while language models load, default `30m`
 - `TRANSLATION_TIMEOUT_SECONDS`: Translation API timeout
+- `LOCAL_MT_MODEL`, `LOCAL_MT_MODEL_REVISION`: Pinned Hugging Face NLLB model and Safetensors revision
+- `LOCAL_MT_REQUIRE_SAFETENSORS`: Refuse unsafe legacy pickle checkpoints during local model setup
+- `LOCAL_MT_MODEL_DIR`, `LOCAL_MT_TOKENIZER_DIR`: Persistent converted model and tokenizer directories
+- `LOCAL_MT_DEVICE`, `LOCAL_MT_COMPUTE_TYPE`: CTranslate2 device and precision, default `cpu` and `int8`
+- `LOCAL_MT_BATCH_SIZE`, `LOCAL_MT_BEAM_SIZE`, `LOCAL_MT_MAX_INPUT_TOKENS`: Local translation inference controls
+- `LOCAL_MT_TOKENIZER_CACHE_SIZE`: Bounded source-language tokenizer cache; the full NLLB translator is shared
+- `HY_MT_BASE_URL`, `HY_MT_API_KEY`, `HY_MT_MODEL`: KoboldCpp endpoint and loaded HY-MT2 model identity
+- `HY_MT_TIMEOUT_SECONDS`, `HY_MT_RETRIES`: HY-MT2 request resilience controls
+- `HY_MT_TEMPERATURE`, `HY_MT_TOP_P`, `HY_MT_TOP_K`, `HY_MT_REPETITION_PENALTY`: Default generation settings; projects can override them
+- `HY_MT_MAX_TOKENS`: Maximum translation response budget, default `256`
+- `HY_MT_CONTEXT_CAPTIONS`: Neighboring semantic units supplied as read-only background context, default `2`
+- `LLM_BASE_URL`: OpenAI-compatible API URL, e.g. `http://host.docker.internal:5002/v1` for KoboldCpp
+- `LLM_MODEL`: Model identifier sent to the chat-completions endpoint
+- `LLM_TIMEOUT_SECONDS`, `LLM_TEMPERATURE`, `LLM_RETRIES`: Reserved local-LLM request controls for future features
+- `LLM_JSON_MODE`: Request OpenAI-style JSON response mode when supported by the server
+- `TRANSLATION_UNIT_MAX_SECONDS`: Maximum duration translated as one semantic unit before fitting it back to caption timestamps
+- `smooth_speaker_fragments` project option: Repair suspicious short diarization fragments in the effective translation stream; default `false`
+- `SOURCE_RECONSTRUCTION_MAX_GAP_SECONDS`, `SOURCE_RECONSTRUCTION_MAX_FRAGMENT_CHARS`: Conservative reconstruction limits
+- `SOURCE_REVIEW_CONFIDENCE_THRESHOLD`: Confidence below which subtitle rows show a source-review warning
+- `CAPTION_MAX_DURATION_SECONDS`, `CAPTION_MAX_CHARS`, `CAPTION_LINE_CHARS`, `CAPTION_PAUSE_SECONDS`: Subtitle readability controls
 - `DIAGNOSTICS_TIMEOUT_SECONDS`: Timeout for Redis and FFmpeg readiness checks, default `2`
 - `DIAGNOSTICS_DEEP_CACHE_TTL_SECONDS`: Seconds to reuse a deep diagnostic report, default `300`
 - `WORKER_PING_TIMEOUT_SECONDS`: Timeout for the Celery worker readiness ping, default `2`
@@ -169,10 +214,11 @@ the translation service is ready.
 ## Runtime Diagnostics
 
 `GET /api/diagnostics` runs quick checks for the database, Redis, Celery worker,
-storage, FFmpeg, WhisperX configuration, and the selected translation provider.
+storage, FFmpeg, WhisperX configuration, and the required translation provider.
 It returns HTTP `200` when ready and `503` when a required subsystem fails.
 
-Use `deep=true` to validate WhisperX package compatibility and gated diarization access.
+Use `deep=true` to validate WhisperX package compatibility, gated diarization access,
+and the pinned Japanese Safetensors revision.
 The expensive deep transcription result is cached briefly while database,
 worker, storage, FFmpeg, and translation checks are rerun on every request.
 Add `refresh=true` to force a fresh provider result:
@@ -211,6 +257,7 @@ Celery control ping remains as a startup and backward-compatibility fallback.
 ## API Endpoints
 
 - `GET /api/diagnostics`: Check runtime subsystem readiness; supports `deep` and `refresh`
+- `GET /api/translation/settings`: Get default HY-MT2 sampling settings
 - `POST /api/projects`: Create a project
 - `GET /api/projects`: List projects
 - `GET /api/projects/<project_id>`: Get project metadata
@@ -230,12 +277,42 @@ Celery control ping remains as a startup and backward-compatibility fallback.
 
 The app keeps transcription and translation behind small interfaces so provider internals can evolve without changing the REST API:
 
-- Transcription uses WhisperX for aligned timestamps and speaker labels. The first run may download the selected model into `backend/storage/models`.
-- Set `HF_TOKEN` to a Hugging Face read token when `WHISPERX_DIARIZE=true`, which is the default.
+- Transcription uses WhisperX for aligned timestamps. Speaker detection is an opt-in project setting because Pyannote adds substantial compute. The first run may download the selected model into `backend/storage/models`.
+- Japanese uses a separately pinned Safetensors alignment revision. If that model cannot
+  load and `WHISPERX_ALIGNMENT_FAILURE_MODE=fallback`, processing continues with
+  proportional estimated timing, displays an `Estimated timing` marker, and records a
+  non-fatal warning. Other alignment errors remain fatal.
+- Set `HF_TOKEN` to a Hugging Face read token for projects that enable speaker detection.
 - Mock translation prefixes visible language labels and applies a tiny dictionary for common demo languages.
-- `TRANSLATION_PROVIDER=libretranslate` sends subtitle text to the self-hosted LibreTranslate service for actual target-language translation.
+- `TRANSLATION_PROVIDER=hy-mt2` or the default routed provider sends semantic source units to HY-MT2 through KoboldCpp.
 
 Whisper is used for transcription only. Subtitle translation is handled separately because Whisper's built-in translation mode translates speech to English rather than arbitrary target languages.
+
+Raw WhisperX words remain immutable and auditable. A separate effective stream
+may reassign suspicious one- or two-character diarization fragments when they
+touch a longer low-confidence phrase; this changes boundary selection, not the
+stored recognition. Deterministic punctuation, pause, speaker, duration, and
+character rules choose every caption boundary. Adjacent boundaries are grouped
+into short semantic units for local translation, then target wording is fitted
+back onto the original timestamps. The LLM never controls timestamps or caption
+coverage.
+
+The recommended translator is HY-MT2-7B running as a GGUF through KoboldCpp.
+Neighboring source units and project glossary terms may be supplied as read-only
+context, but HY-MT2 never controls timestamps. Empty, untranslated, repetitive,
+explanatory, or unreasonably long responses are rejected. SubtitleD then falls
+back to the revision-pinned NLLB-200 distilled 600M CTranslate2 model and finally
+LibreTranslate. This is a conservative quality gate, not a semantic quality
+score. Each API segment exposes
+translator/model provenance, reconstruction provenance, translation-unit ID,
+timing quality, and low-confidence warnings.
+
+NLLB-200 is licensed CC-BY-NC-4.0. This local configuration is intended for
+noncommercial use; replace or re-evaluate the model license before commercial
+deployment. The future provider interface can also host an Apache-2.0 MADLAD
+checkpoint on hardware capable of running its larger 3B+ models.
+
+Projects can provide a glossary of expected names and technical terms. SubtitleD passes it to WhisperX as recognition hints and HY-MT2 as terminology guidance, while persisting the untouched aligned words and confidence scores for auditing. Speaker-fragment smoothing is a separate project option, disabled by default, so diarization can remain enabled without changing brief speaker assignments. Temperature, top-p, top-k, repetition penalty, output tokens, and context depth can be adjusted per project.
 
 WhisperX is required for transcription and is installed by the default backend image from `backend/requirements.txt`.
 Model caches are directed into `/app/storage/models`, which is bind-mounted to `backend/storage/models`, so repeated `docker compose up` and image rebuilds should not re-download the same Hugging Face, Torch, or Whisper model files. The backend Dockerfile also uses a BuildKit pip cache to speed up dependency rebuilds.
@@ -254,7 +331,7 @@ docker compose up -d backend worker
 - No authentication or user accounts yet
 - Translation quality depends on the configured LibreTranslate language models
 - WhisperX speaker diarization requires a Hugging Face token with access to the pyannote diarization model
-- No progress percentages
+- Processing progress is word-based; WhisperX itself does not yet expose fine-grained progress
 - Subtitle styling is limited to FFmpeg's default SRT rendering
 - Render quality depends on local FFmpeg support and source video codecs
 - Automatic table creation is intended for local MVP development, not production migrations
@@ -266,5 +343,4 @@ docker compose up -d backend worker
 - Additional translation providers
 - Subtitle styling with ASS files
 - User accounts
-- Progress percentages
 - Subtitle timing quality checker

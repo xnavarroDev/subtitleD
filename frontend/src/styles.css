@@ -171,6 +171,48 @@ textarea {
   border: 1px solid #f0b8c0;
 }
 
+.notice.warning,
+.notice.progress-notice {
+  color: #6f4800;
+  background: #fff6df;
+  border: 1px solid #efd493;
+}
+
+.checkbox-option {
+  display: flex !important;
+  grid-template-columns: none !important;
+  flex-direction: row !important;
+  align-items: flex-start;
+  gap: 10px !important;
+}
+
+.checkbox-option input {
+  width: auto;
+  margin-top: 3px;
+}
+
+.checkbox-option span {
+  display: grid;
+  gap: 3px;
+}
+
+.advanced-settings {
+  border: 1px solid #dce6e2;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.advanced-settings summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.advanced-settings > small {
+  display: block;
+  margin: 8px 0 12px;
+  color: #687a75;
+}
+
 .empty-state {
   color: #687a75;
   border: 1px dashed #cbd8d4;
