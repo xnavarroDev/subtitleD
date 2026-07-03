@@ -388,6 +388,9 @@ textarea {
 .checkbox-option input { width: auto; margin-top: 3px; }
 .checkbox-option span { display: grid; gap: 3px; }
 .project-option-list { display: grid; gap: 10px; margin-top: 16px; }
+.advanced-settings { border: 1px solid #dce6e2; border-radius: 8px; padding: 12px; }
+.advanced-settings summary { cursor: pointer; font-weight: 800; }
+.advanced-settings > small { display: block; margin: 8px 0 12px; color: #687a75; }
 
 .table-wrap {
   overflow-x: auto;

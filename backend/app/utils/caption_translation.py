@@ -81,6 +81,7 @@ def iter_deterministic_translation(
     pause_seconds=0.65,
     review_confidence_threshold=0.45,
     translation_unit_max_seconds=12,
+    context_captions=0,
 ):
     """Choose deterministic boundaries and translate semantic source units."""
     indexed = index_words(words)
@@ -89,9 +90,11 @@ def iter_deterministic_translation(
     boundaries = _deterministic_boundaries(
         indexed, 0, len(indexed) - 1, max_duration, max_chars, pause_seconds
     )
-    for group in _group_boundaries(
-        boundaries, indexed, translation_unit_max_seconds
-    ):
+    groups = _group_boundaries(boundaries, indexed, translation_unit_max_seconds)
+    for group_index, group in enumerate(groups):
+        context_before, context_after = _translation_context(
+            groups, group_index, indexed, context_captions
+        )
         batch = []
         batch.extend(_translate_boundary_group(
             indexed,
@@ -101,6 +104,8 @@ def iter_deterministic_translation(
             target_language,
             max_chars,
             review_confidence_threshold,
+            context_before,
+            context_after,
         ))
         translation_warnings = list(dict.fromkeys(
             item.warning for item in batch if item.warning
@@ -144,6 +149,20 @@ def _group_boundaries(boundaries, words, max_seconds):
     return groups
 
 
+def _translation_context(groups, group_index, words, context_captions):
+    count = max(int(context_captions or 0), 0)
+    before = groups[max(0, group_index - count):group_index]
+    after = groups[group_index + 1:group_index + 1 + count]
+    return (
+        tuple(_group_source(group, words) for group in before),
+        tuple(_group_source(group, words) for group in after),
+    )
+
+
+def _group_source(group, words):
+    return _join(words[group[0].start_index:group[-1].end_index + 1])
+
+
 def _translate_boundary_group(
     words,
     boundaries,
@@ -152,6 +171,8 @@ def _translate_boundary_group(
     target_language,
     max_chars,
     review_confidence_threshold,
+    context_before=(),
+    context_after=(),
 ):
     first, last = boundaries[0], boundaries[-1]
     unit_id = f"u{first.start_index:06d}-{last.end_index:06d}"
@@ -161,11 +182,13 @@ def _translate_boundary_group(
             source_language, target_language, max_chars,
             first.used_fallback, first.method,
             review_confidence_threshold, unit_id,
+            context_before, context_after,
         )
 
     source = _join(words[first.start_index:last.end_index + 1])
     translated, provider_name, model_name, provider_warning = _provider_translate(
-        provider, source, source_language, target_language
+        provider, source, source_language, target_language,
+        context_before, context_after,
     )
     token_count = len(translated.split()) if len(translated.split()) > 1 else len(translated)
     if (
@@ -179,6 +202,7 @@ def _translate_boundary_group(
                 source_language, target_language, max_chars,
                 boundary.used_fallback, f"{boundary.method}_resized",
                 review_confidence_threshold, unit_id,
+                context_before, context_after,
             ))
         return output
 
@@ -191,6 +215,7 @@ def _translate_boundary_group(
                 source_language, target_language, max_chars,
                 boundary.used_fallback, f"{boundary.method}_resized",
                 review_confidence_threshold, unit_id,
+                context_before, context_after,
             ))
         return output
     output = []
@@ -287,10 +312,13 @@ def _translate_boundary(
     method,
     review_confidence_threshold,
     translation_unit_id,
+    context_before=(),
+    context_after=(),
 ):
     source = _join(words[start:end + 1])
     translated, provider_name, model_name, provider_warning = _provider_translate(
-        provider, source, source_language, target_language
+        provider, source, source_language, target_language,
+        context_before, context_after,
     )
     if not translated:
         raise RuntimeError("Translation provider returned empty caption text.")
@@ -308,16 +336,28 @@ def _translate_boundary(
     return _translate_boundary(
         words, start, split_at, provider, source_language, target_language,
         max_chars, used_fallback, resized_method, review_confidence_threshold,
-        translation_unit_id,
+        translation_unit_id, context_before, context_after,
     ) + _translate_boundary(
         words, split_at + 1, end, provider, source_language, target_language,
         max_chars, used_fallback, resized_method, review_confidence_threshold,
-        translation_unit_id,
+        translation_unit_id, context_before, context_after,
     )
 
 
-def _provider_translate(provider, source, source_language, target_language):
-    if hasattr(provider, "translate_with_metadata"):
+def _provider_translate(
+    provider, source, source_language, target_language,
+    context_before=(), context_after=(),
+):
+    if hasattr(provider, "translate_with_context"):
+        output = provider.translate_with_context(
+            source, source_language, target_language,
+            context_before, context_after,
+        )
+        translated_value = output.text
+        provider_name = output.provider
+        model_name = output.model
+        provider_warning = output.warning
+    elif hasattr(provider, "translate_with_metadata"):
         output = provider.translate_with_metadata(source, source_language, target_language)
         translated_value = output.text
         provider_name = output.provider

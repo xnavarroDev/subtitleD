@@ -17,6 +17,9 @@ class LocalLlmClient:
         model,
         timeout_seconds=60,
         temperature=0,
+        top_p=None,
+        top_k=None,
+        repetition_penalty=None,
         retries=1,
         json_mode=False,
         opener=None,
@@ -26,6 +29,11 @@ class LocalLlmClient:
         self.model = str(model or "").strip()
         self.timeout_seconds = float(timeout_seconds)
         self.temperature = float(temperature)
+        self.top_p = None if top_p is None else float(top_p)
+        self.top_k = None if top_k is None else int(top_k)
+        self.repetition_penalty = (
+            None if repetition_penalty is None else float(repetition_penalty)
+        )
         self.retries = max(int(retries), 0)
         self.json_mode = bool(json_mode)
         self.opener = opener or urlopen
@@ -52,18 +60,30 @@ class LocalLlmClient:
             Request(self.models_url, headers=self._headers()),
             timeout=min(self.timeout_seconds, 5),
         ) as response:
-            response.read()
+            payload = json.loads(response.read().decode("utf-8"))
+        return [
+            str(item.get("id")) for item in payload.get("data", [])
+            if isinstance(item, dict) and item.get("id")
+        ]
 
     def request_json(self, messages, max_tokens):
+        return self.request_text(messages, max_tokens, validator=parse_json, json_mode=True)
+
+    def request_text(
+        self, messages, max_tokens, validator=None, json_mode=False, extra_body=None,
+    ):
         last_error = None
         for _ in range(self.retries + 1):
             try:
-                return parse_json(self._request(messages, max_tokens))
+                value = self._request(
+                    messages, max_tokens, json_mode=json_mode, extra_body=extra_body
+                )
+                return validator(value) if validator else value
             except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
                 last_error = exc
         raise RuntimeError(f"Local LLM request failed: {last_error}") from last_error
 
-    def _request(self, messages, max_tokens):
+    def _request(self, messages, max_tokens, json_mode=False, extra_body=None):
         payload = {
             "model": self.model,
             "messages": messages,
@@ -71,7 +91,17 @@ class LocalLlmClient:
             "max_tokens": int(max_tokens),
             "stream": False,
         }
-        if self.json_mode:
+        if self.top_p is not None:
+            payload["top_p"] = self.top_p
+        if self.top_k is not None:
+            payload["top_k"] = self.top_k
+        if self.repetition_penalty is not None:
+            # KoboldCpp accepts its native name as an OpenAI request extension.
+            payload["rep_pen"] = self.repetition_penalty
+            payload["repetition_penalty"] = self.repetition_penalty
+        if extra_body:
+            payload.update(extra_body)
+        if json_mode or self.json_mode:
             payload["response_format"] = {"type": "json_object"}
         request = Request(
             self.chat_url,
@@ -123,7 +153,7 @@ def get_local_llm_client(opener=None):
         current_app.config.get("LLM_MODEL", ""),
         current_app.config.get("LLM_TIMEOUT_SECONDS", 60),
         current_app.config.get("LLM_TEMPERATURE", 0),
-        current_app.config.get("LLM_RETRIES", 1),
-        current_app.config.get("LLM_JSON_MODE", False),
+        retries=current_app.config.get("LLM_RETRIES", 1),
+        json_mode=current_app.config.get("LLM_JSON_MODE", False),
         opener=opener,
     )

@@ -118,7 +118,17 @@ def _translate_words(project, words):
         == normalize_translation_language(project.target_language)
         and normalize_translation_language(effective_source_language) != "auto"
     )
-    translator = _IdentityTranslationProvider() if same_language else get_translation_provider()
+    translator = (
+        _IdentityTranslationProvider()
+        if same_language
+        else get_translation_provider(_project_translation_settings(project))
+    )
+    if not same_language and hasattr(translator, "check_ready"):
+        readiness = translator.check_ready(
+            effective_source_language, project.target_language
+        )
+        if readiness.status == "fail":
+            raise RuntimeError(readiness.message)
     warnings = []
     prepared = []
     for batch, completed_words, warning in iter_deterministic_translation(
@@ -135,6 +145,7 @@ def _translate_words(project, words):
         translation_unit_max_seconds=current_app.config.get(
             "TRANSLATION_UNIT_MAX_SECONDS", 12
         ),
+        context_captions=project.translation_context_captions,
     ):
         prepared.extend(batch)
         if warning:
@@ -143,6 +154,17 @@ def _translate_words(project, words):
         project.processing_warning = _warning_text(warnings)
         db.session.commit()
     return prepared, warnings
+
+
+def _project_translation_settings(project):
+    return {
+        "temperature": project.translation_temperature,
+        "top_p": project.translation_top_p,
+        "top_k": project.translation_top_k,
+        "repetition_penalty": project.translation_repetition_penalty,
+        "max_tokens": project.translation_max_tokens,
+        "glossary": project.glossary,
+    }
 
 
 def _reconstruct_words(project, words):

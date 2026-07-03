@@ -37,6 +37,12 @@ class Project(db.Model):
     translation_completed_words = db.Column(db.Integer, nullable=False, default=0)
     translation_total_words = db.Column(db.Integer, nullable=False, default=0)
     glossary = db.Column(db.Text, nullable=True)
+    translation_temperature = db.Column(db.Float, nullable=False, default=0.7)
+    translation_top_p = db.Column(db.Float, nullable=False, default=0.6)
+    translation_top_k = db.Column(db.Integer, nullable=False, default=20)
+    translation_repetition_penalty = db.Column(db.Float, nullable=False, default=1.05)
+    translation_max_tokens = db.Column(db.Integer, nullable=False, default=256)
+    translation_context_captions = db.Column(db.Integer, nullable=False, default=2)
     detect_speakers = db.Column(db.Boolean, nullable=False, default=False)
     smooth_speaker_fragments = db.Column(db.Boolean, nullable=False, default=False)
     source_language = db.Column(db.String(64), nullable=False)
@@ -74,6 +80,14 @@ class Project(db.Model):
             "processing_warning": self.processing_warning,
             "translation_progress": {"completed": completed, "total": total},
             "glossary": self.glossary or "",
+            "translation_settings": {
+                "temperature": self.translation_temperature,
+                "top_p": self.translation_top_p,
+                "top_k": self.translation_top_k,
+                "repetition_penalty": self.translation_repetition_penalty,
+                "max_tokens": self.translation_max_tokens,
+                "context_captions": self.translation_context_captions,
+            },
             "detect_speakers": bool(self.detect_speakers),
             "smooth_speaker_fragments": bool(self.smooth_speaker_fragments),
             "source_language": self.source_language,

@@ -218,17 +218,18 @@ class RoutedTranslationProvider(BaseTranslationProvider):
 
     provider_name = "routed-local"
 
-    def __init__(self, default_provider, overrides=None, providers=None):
+    def __init__(self, default_provider, overrides=None, providers=None, settings=None):
         self.default_provider = str(default_provider or "nllb-ct2").strip().lower()
         self.overrides = overrides or {}
         self.providers = providers or {}
+        self.settings = settings or {}
 
     def _provider(self, source_language=None, target_language=None):
         source = normalize_language(source_language) or "auto"
         target = normalize_language(target_language) or ""
         name = self.overrides.get((source, target), self.default_provider)
         if name not in self.providers:
-            self.providers[name] = _provider_by_name(name)
+            self.providers[name] = _provider_by_name(name, self.settings)
         return self.providers[name]
 
     def get_languages(self):
@@ -250,8 +251,20 @@ class RoutedTranslationProvider(BaseTranslationProvider):
             return provider.translate_with_metadata(text, source_language, target_language)
         return super().translate_with_metadata(text, source_language, target_language)
 
+    def translate_with_context(
+        self, text, source_language, target_language,
+        context_before=(), context_after=(),
+    ):
+        provider = self._provider(source_language, target_language)
+        if hasattr(provider, "translate_with_context"):
+            return provider.translate_with_context(
+                text, source_language, target_language,
+                context_before, context_after,
+            )
+        return provider.translate_with_metadata(text, source_language, target_language)
 
-def get_translation_provider():
+
+def get_translation_provider(settings=None):
     """Select the configured translation provider.
 
     This is the extension point for a real translation service once credentials
@@ -262,12 +275,14 @@ def get_translation_provider():
         return RoutedTranslationProvider(
             _setting("TRANSLATION_DEFAULT_PROVIDER", "nllb-ct2"),
             _parse_route_overrides(_setting("TRANSLATION_ROUTE_OVERRIDES", "")),
+            settings=settings,
         )
-    return _provider_by_name(provider)
+    return _provider_by_name(provider, settings)
 
 
-def _provider_by_name(provider):
+def _provider_by_name(provider, settings=None):
     provider = str(provider or "").strip().lower()
+    settings = settings or {}
     if provider in {"", "mock"}:
         return MockTranslationProvider()
     if provider in {"libretranslate", "libre_translate", "libre-translate"}:
@@ -278,8 +293,32 @@ def _provider_by_name(provider):
             LocalNllbTranslationProvider(),
             LibreTranslateProvider(),
         )
+    if provider in {"hy-mt", "hy-mt2", "hy-mt2-kobold", "kobold-hy-mt2"}:
+        from .hy_mt import HyMtKoboldTranslationProvider
+        from .local_translation import FallbackTranslationProvider, LocalNllbTranslationProvider
+
+        hy_mt = HyMtKoboldTranslationProvider(
+            base_url=_setting("HY_MT_BASE_URL", "http://host.docker.internal:5002/v1"),
+            api_key=_setting("HY_MT_API_KEY", ""),
+            model=_setting("HY_MT_MODEL", "Hy-MT2-7B"),
+            timeout_seconds=_setting("HY_MT_TIMEOUT_SECONDS", 60),
+            temperature=settings.get("temperature", _setting("HY_MT_TEMPERATURE", 0.7)),
+            top_p=settings.get("top_p", _setting("HY_MT_TOP_P", 0.6)),
+            top_k=settings.get("top_k", _setting("HY_MT_TOP_K", 20)),
+            repetition_penalty=settings.get(
+                "repetition_penalty", _setting("HY_MT_REPETITION_PENALTY", 1.05)
+            ),
+            max_tokens=settings.get("max_tokens", _setting("HY_MT_MAX_TOKENS", 256)),
+            retries=_setting("HY_MT_RETRIES", 1),
+            glossary=settings.get("glossary"),
+        )
+        local_fallback = FallbackTranslationProvider(
+            LocalNllbTranslationProvider(), LibreTranslateProvider()
+        )
+        return FallbackTranslationProvider(hy_mt, local_fallback)
     raise ValueError(
-        "Unknown TRANSLATION_PROVIDER. Use 'routed', 'mock', 'libretranslate', or 'nllb-ct2'."
+        "Unknown TRANSLATION_PROVIDER. Use 'routed', 'mock', 'libretranslate', "
+        "'nllb-ct2', or 'hy-mt2'."
     )
 
 
@@ -299,7 +338,7 @@ def _parse_route_overrides(value):
         source = normalize_language(source.strip()) or source.strip().lower()
         target = normalize_language(target.strip()) or target.strip().lower()
         provider = provider.strip().lower()
-        if provider not in {"nllb", "nllb-ct2", "local", "local-nllb", "libretranslate", "libre_translate", "libre-translate", "mock"}:
+        if provider not in {"nllb", "nllb-ct2", "local", "local-nllb", "libretranslate", "libre_translate", "libre-translate", "mock", "hy-mt", "hy-mt2", "hy-mt2-kobold", "kobold-hy-mt2"}:
             raise ValueError(f"Unknown routed translation provider: {provider}")
         output[(source, target)] = provider
     return output

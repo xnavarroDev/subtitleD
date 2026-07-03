@@ -211,6 +211,7 @@ class FallbackTranslationProvider:
     def __init__(self, primary, fallback):
         self.primary = primary
         self.fallback = fallback
+        self._primary_unavailable_reason = None
 
     @property
     def provider_name(self):
@@ -221,36 +222,76 @@ class FallbackTranslationProvider:
 
     def check_ready(self, source_language=None, target_language=None):
         primary = self.primary.check_ready(source_language, target_language)
-        if primary.status == PASS:
+        if primary.status != FAIL:
             return primary
         fallback = self.fallback.check_ready(source_language, target_language)
-        if fallback.status == PASS:
+        if fallback.status != FAIL:
+            self._primary_unavailable_reason = primary.message
             return DiagnosticCheck(
                 "translation",
                 WARN,
-                f"{primary.message} LibreTranslate fallback is ready.",
+                f"{primary.message} {fallback.message}",
                 {"primary": primary.details, "fallback": fallback.details},
             )
-        return primary
+        return DiagnosticCheck(
+            "translation", FAIL,
+            f"{primary.message} Fallback unavailable: {fallback.message}",
+            {"primary": primary.details, "fallback": fallback.details},
+        )
 
     def translate(self, text, source_language, target_language):
         return self.translate_with_metadata(text, source_language, target_language).text
 
     def translate_with_metadata(self, text, source_language, target_language):
+        return self.translate_with_context(text, source_language, target_language, (), ())
+
+    def translate_with_context(
+        self, text, source_language, target_language,
+        context_before=(), context_after=(),
+    ):
         try:
-            output = self.primary.translate_with_metadata(
-                text, source_language, target_language
-            )
+            if self._primary_unavailable_reason:
+                raise RuntimeError(self._primary_unavailable_reason)
+            if hasattr(self.primary, "translate_with_context"):
+                output = self.primary.translate_with_context(
+                    text, source_language, target_language,
+                    context_before, context_after,
+                )
+            else:
+                output = self.primary.translate_with_metadata(
+                    text, source_language, target_language
+                )
             issue = translation_quality_issue(output.text, text)
             if issue:
                 raise RuntimeError(issue)
             return output
         except Exception as exc:
-            translated = self.fallback.translate(text, source_language, target_language)
+            if hasattr(self.fallback, "translate_with_context"):
+                fallback_output = self.fallback.translate_with_context(
+                    text, source_language, target_language,
+                    context_before, context_after,
+                )
+            elif hasattr(self.fallback, "translate_with_metadata"):
+                fallback_output = self.fallback.translate_with_metadata(
+                    text, source_language, target_language
+                )
+            else:
+                fallback_output = TranslationOutput(
+                    self.fallback.translate(text, source_language, target_language),
+                    getattr(self.fallback, "provider_name", "fallback"),
+                )
+            primary_name = getattr(self.primary, "provider_name", "Primary translator")
+            warning = (
+                f"{primary_name} translation failed; {fallback_output.provider} "
+                f"fallback was used: {exc}"
+            )
+            if fallback_output.warning:
+                warning = f"{warning} {fallback_output.warning}"
             return TranslationOutput(
-                translated,
-                getattr(self.fallback, "provider_name", "libretranslate"),
-                warning=f"Local NLLB translation failed; LibreTranslate fallback was used: {exc}",
+                fallback_output.text,
+                fallback_output.provider,
+                fallback_output.model,
+                warning=warning,
             )
 
 

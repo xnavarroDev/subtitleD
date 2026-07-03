@@ -121,6 +121,46 @@ def test_create_project_accepts_glossary(client):
     assert response.json["glossary"] == "Alonzo\nSubtitleD"
 
 
+def test_project_accepts_and_updates_hy_mt_translation_settings(client):
+    created = client.post("/api/projects", json={
+        "title": "HY-MT", "source_language": "ja", "target_language": "en",
+        "translation_settings": {
+            "temperature": .65, "top_p": .55, "top_k": 30,
+            "repetition_penalty": 1.08, "max_tokens": 300,
+            "context_captions": 1,
+        },
+    })
+
+    assert created.status_code == 201
+    assert created.json["translation_settings"]["top_k"] == 30
+    updated = client.patch(f"/api/projects/{created.json['id']}", json={
+        "translation_settings": {"temperature": .7, "context_captions": 3}
+    })
+    assert updated.status_code == 200
+    assert updated.json["translation_settings"]["temperature"] == .7
+    assert updated.json["translation_settings"]["context_captions"] == 3
+    assert updated.json["translation_settings"]["top_k"] == 30
+
+
+def test_project_rejects_invalid_hy_mt_translation_settings(client):
+    response = client.post("/api/projects", json={
+        "title": "Invalid", "source_language": "ja", "target_language": "en",
+        "translation_settings": {"top_p": 1.5},
+    })
+
+    assert response.status_code == 400
+    assert "top_p" in response.json["error"]
+
+
+def test_translation_settings_endpoint_exposes_server_defaults(client):
+    response = client.get("/api/translation/settings")
+
+    assert response.status_code == 200
+    assert response.json["model"] == "Hy-MT2-7B"
+    assert response.json["temperature"] == .7
+    assert response.json["context_captions"] == 2
+
+
 def test_create_project_defaults_expensive_features_off_and_accepts_opt_in(client):
     default = client.post("/api/projects", json={
         "title": "Fast", "source_language": "en", "target_language": "es",

@@ -37,6 +37,11 @@ def create_project():
         ),
         status=ProjectStatus.CREATED,
     )
+    _apply_translation_settings(
+        project,
+        payload.get("translation_settings") or {},
+        defaults=_translation_setting_defaults(),
+    )
     if project.min_speakers is not None and project.max_speakers is not None and project.min_speakers > project.max_speakers:
         return jsonify({"error": "min_speakers cannot be greater than max_speakers"}), 400
     db.session.add(project)
@@ -56,6 +61,15 @@ def list_languages():
         return jsonify(get_translation_provider().get_languages())
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 503
+
+
+@api_bp.get("/translation/settings")
+def translation_settings():
+    return jsonify({
+        "provider": current_app.config.get("TRANSLATION_DEFAULT_PROVIDER", "hy-mt2"),
+        "model": current_app.config.get("HY_MT_MODEL", "Hy-MT2-7B"),
+        **_translation_setting_defaults(),
+    })
 
 
 @api_bp.get("/diagnostics")
@@ -84,6 +98,11 @@ def update_project(project_id):
         project.smooth_speaker_fragments = _parse_bool_value(
             payload["smooth_speaker_fragments"]
         )
+    if "translation_settings" in payload:
+        settings = payload.get("translation_settings")
+        if not isinstance(settings, dict):
+            abort(400, description="translation_settings must be an object")
+        _apply_translation_settings(project, settings)
     db.session.commit()
     return jsonify(project.to_dict(language_names=_translation_language_names()))
 
@@ -284,6 +303,48 @@ def _parse_optional_int(value, field_name):
 
 def _parse_bool_query(value):
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _apply_translation_settings(project, values, defaults=None):
+    if not isinstance(values, dict):
+        abort(400, description="translation_settings must be an object")
+    defaults = defaults or {}
+    fields = {
+        "temperature": ("translation_temperature", float, 0, 2),
+        "top_p": ("translation_top_p", float, 0.01, 1),
+        "top_k": ("translation_top_k", int, 0, 500),
+        "repetition_penalty": ("translation_repetition_penalty", float, 0.5, 2),
+        "max_tokens": ("translation_max_tokens", int, 16, 2048),
+        "context_captions": ("translation_context_captions", int, 0, 5),
+    }
+    for public_name, (attribute, cast, minimum, maximum) in fields.items():
+        if public_name not in values and public_name not in defaults:
+            continue
+        raw = values.get(public_name, defaults.get(public_name))
+        try:
+            parsed = cast(raw)
+        except (TypeError, ValueError):
+            abort(400, description=f"translation_settings.{public_name} must be a number")
+        if parsed < minimum or parsed > maximum:
+            abort(
+                400,
+                description=(
+                    f"translation_settings.{public_name} must be between "
+                    f"{minimum} and {maximum}"
+                ),
+            )
+        setattr(project, attribute, parsed)
+
+
+def _translation_setting_defaults():
+    return {
+        "temperature": current_app.config.get("HY_MT_TEMPERATURE", 0.7),
+        "top_p": current_app.config.get("HY_MT_TOP_P", 0.6),
+        "top_k": current_app.config.get("HY_MT_TOP_K", 20),
+        "repetition_penalty": current_app.config.get("HY_MT_REPETITION_PENALTY", 1.05),
+        "max_tokens": current_app.config.get("HY_MT_MAX_TOKENS", 256),
+        "context_captions": current_app.config.get("HY_MT_CONTEXT_CAPTIONS", 2),
+    }
 
 
 def _parse_bool_value(value):

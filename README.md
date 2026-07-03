@@ -1,6 +1,6 @@
 # SubtitleD
 
-SubtitleD is an MVP subtitle translation web app. It extracts aligned WhisperX words, uses deterministic readable caption boundaries, routes finalized captions through local translation providers, keeps the raw transcript visible for auditing, and produces editable subtitles, SRT exports, and rendered video. A generic KoboldCpp-compatible client is retained as an unused extension point for future features.
+SubtitleD is an MVP subtitle translation web app. It extracts aligned WhisperX words, uses deterministic readable caption boundaries, translates semantic units with HY-MT2 through local KoboldCpp, keeps the raw transcript visible for auditing, and produces editable subtitles, SRT exports, and rendered video. NLLB and LibreTranslate remain local fallbacks.
 
 ## Tech Stack
 
@@ -26,7 +26,12 @@ SubtitleD is an MVP subtitle translation web app. It extracts aligned WhisperX w
    docker compose up --build
    ```
 
-3. Install the local NLLB translation model explicitly. This downloads and
+3. Load `tencent/Hy-MT2-7B-GGUF` in a current KoboldCpp build on host port
+   `5002`. The Q4_K_M and Q6_K variants are practical local defaults. SubtitleD
+   sends translation prompts and per-project sampling settings to its
+   OpenAI-compatible `/v1/chat/completions` endpoint.
+
+4. Install the local NLLB fallback explicitly. This downloads and
    converts the pinned 600M checkpoint to CTranslate2 INT8 and stores it in the
    persistent model directory:
 
@@ -38,7 +43,7 @@ SubtitleD is an MVP subtitle translation web app. It extracts aligned WhisperX w
    Until this is run, SubtitleD remains usable through its local
    LibreTranslate fallback and displays a readiness warning.
 
-4. Open the app:
+5. Open the app:
 
    - Frontend: http://localhost:5173
    - Backend health check: http://localhost:5000/health
@@ -165,7 +170,7 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `HF_TOKEN`: Hugging Face `read` token used by WhisperX diarization; the token account must have accepted the pyannote model conditions
 - `TRANSLATION_PROVIDER`: `routed` (recommended), `nllb-ct2`, `libretranslate`, or `mock`
 - `TRANSLATION_DEFAULT_PROVIDER`: Provider used when no language-pair route matches
-- `TRANSLATION_ROUTE_OVERRIDES`: Comma-separated routes such as `ja>en=libretranslate,fr>en=libretranslate`
+- `TRANSLATION_ROUTE_OVERRIDES`: Optional comma-separated routes such as `ja>en=libretranslate`
 - `LIBRETRANSLATE_URL`: LibreTranslate API base URL, default Docker service URL
 - `LIBRETRANSLATE_API_KEY`: Optional API key for protected LibreTranslate instances
 - `LIBRETRANSLATE_UPDATE_MODELS`: Whether LibreTranslate should download missing models
@@ -177,6 +182,11 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `LOCAL_MT_DEVICE`, `LOCAL_MT_COMPUTE_TYPE`: CTranslate2 device and precision, default `cpu` and `int8`
 - `LOCAL_MT_BATCH_SIZE`, `LOCAL_MT_BEAM_SIZE`, `LOCAL_MT_MAX_INPUT_TOKENS`: Local translation inference controls
 - `LOCAL_MT_TOKENIZER_CACHE_SIZE`: Bounded source-language tokenizer cache; the full NLLB translator is shared
+- `HY_MT_BASE_URL`, `HY_MT_API_KEY`, `HY_MT_MODEL`: KoboldCpp endpoint and loaded HY-MT2 model identity
+- `HY_MT_TIMEOUT_SECONDS`, `HY_MT_RETRIES`: HY-MT2 request resilience controls
+- `HY_MT_TEMPERATURE`, `HY_MT_TOP_P`, `HY_MT_TOP_K`, `HY_MT_REPETITION_PENALTY`: Default generation settings; projects can override them
+- `HY_MT_MAX_TOKENS`: Maximum translation response budget, default `256`
+- `HY_MT_CONTEXT_CAPTIONS`: Neighboring semantic units supplied as read-only background context, default `2`
 - `LLM_BASE_URL`: OpenAI-compatible API URL, e.g. `http://host.docker.internal:5002/v1` for KoboldCpp
 - `LLM_MODEL`: Model identifier sent to the chat-completions endpoint
 - `LLM_TIMEOUT_SECONDS`, `LLM_TEMPERATURE`, `LLM_RETRIES`: Reserved local-LLM request controls for future features
@@ -247,6 +257,7 @@ Celery control ping remains as a startup and backward-compatibility fallback.
 ## API Endpoints
 
 - `GET /api/diagnostics`: Check runtime subsystem readiness; supports `deep` and `refresh`
+- `GET /api/translation/settings`: Get default HY-MT2 sampling settings
 - `POST /api/projects`: Create a project
 - `GET /api/projects`: List projects
 - `GET /api/projects/<project_id>`: Get project metadata
@@ -273,7 +284,7 @@ The app keeps transcription and translation behind small interfaces so provider 
   non-fatal warning. Other alignment errors remain fatal.
 - Set `HF_TOKEN` to a Hugging Face read token for projects that enable speaker detection.
 - Mock translation prefixes visible language labels and applies a tiny dictionary for common demo languages.
-- `TRANSLATION_PROVIDER=libretranslate` sends subtitle text to the self-hosted LibreTranslate service for actual target-language translation.
+- `TRANSLATION_PROVIDER=hy-mt2` or the default routed provider sends semantic source units to HY-MT2 through KoboldCpp.
 
 Whisper is used for transcription only. Subtitle translation is handled separately because Whisper's built-in translation mode translates speech to English rather than arbitrary target languages.
 
@@ -286,11 +297,13 @@ into short semantic units for local translation, then target wording is fitted
 back onto the original timestamps. The LLM never controls timestamps or caption
 coverage.
 
-The recommended translator is the revision-pinned NLLB-200 distilled 600M model
-running locally through CTranslate2 INT8. If NLLB is missing, fails, returns the
-source unchanged, or produces obvious repetitive degeneration, LibreTranslate
-is used locally and the segment records that fallback. This is a conservative
-quality gate, not a semantic quality score. Each API segment exposes
+The recommended translator is HY-MT2-7B running as a GGUF through KoboldCpp.
+Neighboring source units and project glossary terms may be supplied as read-only
+context, but HY-MT2 never controls timestamps. Empty, untranslated, repetitive,
+explanatory, or unreasonably long responses are rejected. SubtitleD then falls
+back to the revision-pinned NLLB-200 distilled 600M CTranslate2 model and finally
+LibreTranslate. This is a conservative quality gate, not a semantic quality
+score. Each API segment exposes
 translator/model provenance, reconstruction provenance, translation-unit ID,
 timing quality, and low-confidence warnings.
 
@@ -299,7 +312,7 @@ noncommercial use; replace or re-evaluate the model license before commercial
 deployment. The future provider interface can also host an Apache-2.0 MADLAD
 checkpoint on hardware capable of running its larger 3B+ models.
 
-Projects can provide a glossary of expected names and technical terms. SubtitleD passes it to WhisperX as recognition hints and persists the untouched aligned words and confidence scores for auditing. Speaker-fragment smoothing is a separate project option, disabled by default, so diarization can remain enabled without changing brief speaker assignments. The OpenAI-compatible local-LLM client remains available as an extension point, but current processing does not call it.
+Projects can provide a glossary of expected names and technical terms. SubtitleD passes it to WhisperX as recognition hints and HY-MT2 as terminology guidance, while persisting the untouched aligned words and confidence scores for auditing. Speaker-fragment smoothing is a separate project option, disabled by default, so diarization can remain enabled without changing brief speaker assignments. Temperature, top-p, top-k, repetition penalty, output tokens, and context depth can be adjusted per project.
 
 WhisperX is required for transcription and is installed by the default backend image from `backend/requirements.txt`.
 Model caches are directed into `/app/storage/models`, which is bind-mounted to `backend/storage/models`, so repeated `docker compose up` and image rebuilds should not re-download the same Hugging Face, Torch, or Whisper model files. The backend Dockerfile also uses a BuildKit pip cache to speed up dependency rebuilds.

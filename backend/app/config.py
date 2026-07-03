@@ -89,10 +89,22 @@ class Config:
     LOCAL_MT_BEAM_SIZE = int(os.getenv("LOCAL_MT_BEAM_SIZE", "4"))
     LOCAL_MT_MAX_INPUT_TOKENS = int(os.getenv("LOCAL_MT_MAX_INPUT_TOKENS", "512"))
     LOCAL_MT_TOKENIZER_CACHE_SIZE = int(os.getenv("LOCAL_MT_TOKENIZER_CACHE_SIZE", "8"))
-    TRANSLATION_DEFAULT_PROVIDER = os.getenv("TRANSLATION_DEFAULT_PROVIDER", "nllb-ct2")
+    TRANSLATION_DEFAULT_PROVIDER = os.getenv("TRANSLATION_DEFAULT_PROVIDER", "hy-mt2")
     TRANSLATION_ROUTE_OVERRIDES = os.getenv(
-        "TRANSLATION_ROUTE_OVERRIDES", "ja>en=libretranslate,fr>en=libretranslate"
+        "TRANSLATION_ROUTE_OVERRIDES", ""
     )
+
+    HY_MT_BASE_URL = os.getenv("HY_MT_BASE_URL", "http://host.docker.internal:5002/v1")
+    HY_MT_API_KEY = os.getenv("HY_MT_API_KEY", "")
+    HY_MT_MODEL = os.getenv("HY_MT_MODEL", "Hy-MT2-7B")
+    HY_MT_TIMEOUT_SECONDS = float(os.getenv("HY_MT_TIMEOUT_SECONDS", "60"))
+    HY_MT_TEMPERATURE = float(os.getenv("HY_MT_TEMPERATURE", "0.7"))
+    HY_MT_TOP_P = float(os.getenv("HY_MT_TOP_P", "0.6"))
+    HY_MT_TOP_K = int(os.getenv("HY_MT_TOP_K", "20"))
+    HY_MT_REPETITION_PENALTY = float(os.getenv("HY_MT_REPETITION_PENALTY", "1.05"))
+    HY_MT_MAX_TOKENS = int(os.getenv("HY_MT_MAX_TOKENS", "256"))
+    HY_MT_CONTEXT_CAPTIONS = int(os.getenv("HY_MT_CONTEXT_CAPTIONS", "2"))
+    HY_MT_RETRIES = int(os.getenv("HY_MT_RETRIES", "1"))
 
     LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
     LLM_API_KEY = os.getenv("LLM_API_KEY", "")

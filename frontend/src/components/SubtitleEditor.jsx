@@ -57,7 +57,7 @@ export default function SubtitleEditor({ projectId, enabled }) {
         <div><p className="eyebrow">Subtitles</p><h2>Transcript and Translation</h2></div>
         <button onClick={loadSegments} disabled={!enabled}>Refresh</button>
       </div>
-      <p className="editor-help">The transcript preserves WhisperX output. Sliding-window context chooses timing, while the configured local model translates complete source units.</p>
+      <p className="editor-help">The transcript preserves WhisperX output. Deterministic rules choose timing, while the configured local model translates complete source units with optional neighboring context.</p>
       {error ? <div className="notice error">{error}</div> : null}
       {!enabled ? <div className="empty-state">Process the video to create subtitle segments.</div> : !segments.length ? <div className="empty-state">No segments found.</div> : (
         <div className="table-wrap"><table>
@@ -109,6 +109,7 @@ function methodLabel(value) {
 function providerLabel(segment) {
   const labels = {
     "nllb-ct2": "NLLB local",
+    "hy-mt2-kobold": "HY-MT2 via KoboldCpp",
     libretranslate: "LibreTranslate fallback",
     identity: "Same-language copy",
     mock: "Mock translator"

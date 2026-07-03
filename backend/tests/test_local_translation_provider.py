@@ -121,7 +121,7 @@ def test_local_provider_falls_back_to_libre_with_provenance():
     assert output == TranslationOutput(
         "Fallback text",
         "libretranslate",
-        warning="Local NLLB translation failed; LibreTranslate fallback was used: model unavailable",
+        warning="nllb-ct2 translation failed; libretranslate fallback was used: model unavailable",
     )
 
 

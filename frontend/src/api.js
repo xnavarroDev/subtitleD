@@ -11,6 +11,7 @@
  * @property {string|null} processing_warning
  * @property {{completed:number,total:number}} translation_progress
  * @property {string} glossary
+ * @property {{temperature:number,top_p:number,top_k:number,repetition_penalty:number,max_tokens:number,context_captions:number}} translation_settings
  * @property {boolean} detect_speakers
  * @property {boolean} smooth_speaker_fragments
  * @property {string} source_language
@@ -138,6 +139,11 @@ export async function deleteProject(projectId) {
 /** Return languages currently available from the configured translation provider. */
 export function listLanguages() {
   return apiRequest("/languages");
+}
+
+/** Return server defaults for per-project HY-MT2 generation settings. */
+export function getTranslationSettings() {
+  return apiRequest("/translation/settings");
 }
 
 /** Load project metadata, including status and media URLs. */

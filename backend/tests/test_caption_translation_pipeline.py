@@ -92,3 +92,33 @@ def test_identity_translation_preserves_same_language_text():
     )))
 
     assert results[0].translated_text == "word0 word1"
+
+
+def test_neighboring_semantic_units_are_context_not_timing_instructions():
+    class ContextTranslator:
+        def __init__(self):
+            self.calls = []
+
+        def translate_with_context(
+            self, text, source, target, context_before=(), context_after=(),
+        ):
+            from app.providers.local_translation import TranslationOutput
+            self.calls.append((text, context_before, context_after))
+            return TranslationOutput(f"T:{text}", "context-test")
+
+    words = [
+        TranscriptWord("First.", 0, .4, "A", .9),
+        TranscriptWord("Second.", 1, 1.4, "A", .9),
+        TranscriptWord("Third.", 2, 2.4, "A", .9),
+    ]
+    translator = ContextTranslator()
+    results = flatten(list(iter_deterministic_translation(
+        words, translator, "en", "es",
+        max_duration=.6, translation_unit_max_seconds=.5, context_captions=1,
+    )))
+
+    assert translator.calls[0] == ("First.", (), ("Second.",))
+    assert translator.calls[1] == ("Second.", ("First.",), ("Third.",))
+    assert [(item.start_time, item.end_time) for item in results] == [
+        (0.0, .4), (1.0, 1.4), (2.0, 2.4),
+    ]

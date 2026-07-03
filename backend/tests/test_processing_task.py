@@ -68,7 +68,7 @@ def test_processing_preserves_whisperx_text_and_uses_deterministic_result(app, m
     monkeypatch.setattr(tasks, "require_job_preflight", lambda *args, **kwargs: None)
     monkeypatch.setattr(tasks, "extract_audio", lambda source, output: output.write_bytes(b"audio"))
     monkeypatch.setattr(tasks, "get_transcription_provider", lambda: Transcriber())
-    monkeypatch.setattr(tasks, "get_translation_provider", lambda: Libre())
+    monkeypatch.setattr(tasks, "get_translation_provider", lambda *_args, **_kwargs: Libre())
 
     with app.app_context():
         tasks.process_video_task.run(project_id)
@@ -106,7 +106,7 @@ def test_failed_reprocessing_preserves_previous_subtitles(app, monkeypatch):
     monkeypatch.setattr(tasks, "require_job_preflight", lambda *args, **kwargs: None)
     monkeypatch.setattr(tasks, "extract_audio", lambda source, output: output.write_bytes(b"audio"))
     monkeypatch.setattr(tasks, "get_transcription_provider", lambda: Transcriber())
-    monkeypatch.setattr(tasks, "get_translation_provider", lambda: BrokenFallback())
+    monkeypatch.setattr(tasks, "get_translation_provider", lambda *_args, **_kwargs: BrokenFallback())
 
     with app.app_context(), pytest.raises(RuntimeError):
         tasks.process_video_task.run(project_id)
@@ -114,4 +114,3 @@ def test_failed_reprocessing_preserves_previous_subtitles(app, monkeypatch):
         project = db.session.get(Project, project_id)
         assert project.status == ProjectStatus.PROCESSED
         assert [(item.original_text, item.translated_text) for item in project.segments] == [("Old", "Anterior")]
-
