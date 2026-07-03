@@ -1,4 +1,5 @@
 import { absoluteFileUrl } from "../api";
+import "./VideoPreview.css";
 
 export default function VideoPreview({ project }) {
   const renderedUrl = absoluteFileUrl(project.rendered_video_url);

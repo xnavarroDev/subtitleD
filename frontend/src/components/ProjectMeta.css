@@ -1,0 +1,31 @@
+.meta-panel dl {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.meta-panel div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #edf2f0;
+  padding-bottom: 10px;
+}
+
+.meta-panel dt {
+  color: #60736d;
+  font-weight: 800;
+}
+
+.meta-panel dd {
+  margin: 0;
+  color: #172026;
+  text-align: right;
+}
+
+.project-option-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}

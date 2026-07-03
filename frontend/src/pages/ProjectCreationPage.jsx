@@ -10,6 +10,7 @@ import {
   uploadProjectVideo
 } from "../api";
 import StatusPill from "../components/StatusPill";
+import "./ProjectCreationPage.css";
 
 export default function ProjectCreationPage() {
   const navigate = useNavigate();

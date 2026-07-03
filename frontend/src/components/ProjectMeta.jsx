@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { updateProject } from "../api";
+import "./ProjectMeta.css";
 
 export default function ProjectMeta({ project, onProjectChange }) {
   const [busy, setBusy] = useState(false);

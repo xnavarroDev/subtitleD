@@ -1,5 +1,6 @@
 import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router-dom";
 
+import "./App.css";
 import ProjectCreationPage from "./pages/ProjectCreationPage";
 import ProjectDetailPage from "./pages/ProjectDetailPage";
 
