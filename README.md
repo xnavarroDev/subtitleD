@@ -73,17 +73,16 @@ In PowerShell, set that environment variable with `$env:HF_TOKEN=...` before run
 
 ### Hugging Face Token For Diarization
 
-Speaker diarization uses gated pyannote models from Hugging Face. When a project
+Speaker diarization uses the gated pyannote Community-1 model from Hugging Face. When a project
 enables speaker detection, `HF_TOKEN` must be a Hugging Face
 User Access Token with read access. A standard `read` token is enough for local
 development; a fine-grained token also works if it can read the required pyannote
-model repositories. A `write` token is not needed.
+model repository. A `write` token is not needed.
 
-Before starting the worker, use the same Hugging Face account to accept the user
-conditions for both required model repositories:
+Before starting the worker, use the same Hugging Face account to accept the model's
+user conditions:
 
-- [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
-- [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
+- [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1)
 
 Then add the token to `.env`:
 
@@ -159,6 +158,7 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `WHISPER_MODEL_DIR`: Persistent model download/cache directory
 - `WHISPERX_BATCH_SIZE`: WhisperX transcription batch size, default `16`
 - `WHISPERX_DIARIZE`: Legacy/global WhisperX diarization default; projects now opt in and default to `false`
+- `WHISPERX_DIARIZATION_OUTPUT`: `exclusive` (default) uses Community-1's non-overlapping timeline for transcript speaker assignment; `regular` is a rollback option
 - `WHISPER_MODEL_CACHE_SIZE`: Maximum full Whisper models retained by a worker, default `1`
 - `WHISPERX_JA_ALIGN_MODEL`: Japanese CTC alignment model repository
 - `WHISPERX_JA_ALIGN_REVISION`: Pinned Japanese model revision containing Safetensors weights
@@ -167,7 +167,7 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `HF_HOME`: Persistent Hugging Face cache directory, default `/app/storage/models/huggingface`
 - `TORCH_HOME`: Persistent PyTorch cache directory, default `/app/storage/models/torch`
 - `XDG_CACHE_HOME`: Persistent cache directory, default `/app/storage/models/cache`
-- `HF_TOKEN`: Hugging Face `read` token used by WhisperX diarization; the token account must have accepted the pyannote model conditions
+- `HF_TOKEN`: Hugging Face `read` token used by WhisperX diarization; the token account must have accepted the Community-1 model conditions
 - `TRANSLATION_PROVIDER`: `routed` (recommended), `nllb-ct2`, `libretranslate`, or `mock`
 - `TRANSLATION_DEFAULT_PROVIDER`: Provider used when no language-pair route matches
 - `TRANSLATION_ROUTE_OVERRIDES`: Optional comma-separated routes such as `ja>en=libretranslate`
@@ -315,6 +315,7 @@ checkpoint on hardware capable of running its larger 3B+ models.
 Projects can provide a glossary of expected names and technical terms. SubtitleD passes it to WhisperX as recognition hints and HY-MT2 as terminology guidance, while persisting the untouched aligned words and confidence scores for auditing. Speaker-fragment smoothing is a separate project option, disabled by default, so diarization can remain enabled without changing brief speaker assignments. Temperature, top-p, top-k, repetition penalty, output tokens, and context depth can be adjusted per project.
 
 WhisperX is required for transcription and is installed by the default backend image from `backend/requirements.txt`.
+Speaker diarization uses WhisperX 3.8 with pyannote.audio 4 and the Community-1 pipeline. SubtitleD uses Community-1's exclusive speaker timeline by default to reduce ambiguous word assignment during overlapping turns. It cannot recover an interruption when diarization fails to detect or correctly cluster the speaker. Set `WHISPERX_DIARIZATION_OUTPUT=regular` only to compare or roll back assignment behavior. Keep **Smooth short speaker fragments** disabled when genuine short interjections must retain their speaker. Caches from the legacy 3.1 pipeline are ignored and may be removed separately if disk space is needed.
 Model caches are directed into `/app/storage/models`, which is bind-mounted to `backend/storage/models`, so repeated `docker compose up` and image rebuilds should not re-download the same Hugging Face, Torch, or Whisper model files. The backend Dockerfile also uses a BuildKit pip cache to speed up dependency rebuilds.
 
 ## Troubleshooting
@@ -330,7 +331,7 @@ docker compose up -d backend worker
 
 - No authentication or user accounts yet
 - Translation quality depends on the configured LibreTranslate language models
-- WhisperX speaker diarization requires a Hugging Face token with access to the pyannote diarization model
+- WhisperX speaker diarization requires a Hugging Face token with access to the pyannote Community-1 model
 - Processing progress is word-based; WhisperX itself does not yet expose fine-grained progress
 - Subtitle styling is limited to FFmpeg's default SRT rendering
 - Render quality depends on local FFmpeg support and source video codecs

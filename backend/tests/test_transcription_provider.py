@@ -1,5 +1,7 @@
 import sys
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from app.providers.transcription import (
@@ -11,8 +13,10 @@ from app.providers.transcription import (
     normalize_language,
 )
 from app.providers.transcription.whisperx import (
+    ExclusiveDiarizationPipeline,
     JapaneseAlignmentLoadError,
     _load_japanese_align_model,
+    _verify_pyannote_model_access,
 )
 from app.utils.captions import flatten_transcript_words
 
@@ -113,15 +117,41 @@ class FakeWhisperXModule:
 class FakeDiarizationPipeline:
     instances = []
 
-    def __init__(self, use_auth_token, device):
-        self.use_auth_token = use_auth_token
+    def __init__(self, model_name, token, device, cache_dir):
+        self.model_name = model_name
+        self.token = token
         self.device = device
+        self.cache_dir = cache_dir
         self.calls = []
         self.instances.append(self)
 
     def __call__(self, audio, **kwargs):
         self.calls.append({"audio": audio, **kwargs})
         return "diarize-segments"
+
+
+class FakeAnnotation:
+    def __init__(self, intervals):
+        self.intervals = intervals
+
+    def itertracks(self, yield_label=False):
+        assert yield_label is True
+        return iter(self.intervals)
+
+
+class FakePyannotePipeline:
+    def __init__(self, output):
+        self.output = output
+        self.device = None
+        self.calls = []
+
+    def to(self, device):
+        self.device = device
+        return self
+
+    def __call__(self, audio, **kwargs):
+        self.calls.append({"audio": audio, **kwargs})
+        return self.output
 
 
 @pytest.fixture(autouse=True)
@@ -177,6 +207,7 @@ def test_whisperx_provider_transcribes_aligns_and_assigns_speakers(tmp_path):
         batch_size=4,
         model_dir=tmp_path / "models",
         hf_token="secret",
+        hf_cache_dir=tmp_path / "hf-cache",
         diarize=True,
         whisperx_module=fake_whisperx,
         diarization_pipeline_class=FakeDiarizationPipeline,
@@ -235,8 +266,10 @@ def test_whisperx_provider_transcribes_aligns_and_assigns_speakers(tmp_path):
     assert fake_whisperx.align_calls[0]["return_char_alignments"] is False
     assert len(FakeDiarizationPipeline.instances) == 1
     diarization = FakeDiarizationPipeline.instances[0]
-    assert diarization.use_auth_token == "secret"
+    assert diarization.model_name == "pyannote/speaker-diarization-community-1"
+    assert diarization.token == "secret"
     assert diarization.device == "cpu"
+    assert diarization.cache_dir == str(tmp_path / "hf-cache")
     assert diarization.calls == [
         {
             "audio": "audio-array",
@@ -245,6 +278,143 @@ def test_whisperx_provider_transcribes_aligns_and_assigns_speakers(tmp_path):
         }
     ]
     assert fake_whisperx.assign_word_speakers_calls
+
+
+def test_exclusive_pipeline_uses_transcript_friendly_timeline(tmp_path):
+    segment_type = type("Segment", (), {})
+    regular_segment = segment_type()
+    regular_segment.start, regular_segment.end = 0.0, 2.0
+    exclusive_segment = segment_type()
+    exclusive_segment.start, exclusive_segment.end = 0.7, 1.1
+    output = SimpleNamespace(
+        speaker_diarization=FakeAnnotation(
+            [(regular_segment, "regular-track", "SPEAKER_00")]
+        ),
+        exclusive_speaker_diarization=FakeAnnotation(
+            [(exclusive_segment, "exclusive-track", "SPEAKER_01")]
+        ),
+    )
+    fake_model = FakePyannotePipeline(output)
+    factory_calls = []
+
+    def pipeline_factory(model_name, **kwargs):
+        factory_calls.append({"model_name": model_name, **kwargs})
+        return fake_model
+
+    pipeline = ExclusiveDiarizationPipeline(
+        "pyannote/speaker-diarization-community-1",
+        "secret",
+        "cpu",
+        str(tmp_path / "hf-cache"),
+        pipeline_factory=pipeline_factory,
+    )
+    result = pipeline(
+        np.zeros(16000, dtype=np.float32),
+        min_speakers=2,
+        max_speakers=2,
+    )
+
+    assert factory_calls == [{
+        "model_name": "pyannote/speaker-diarization-community-1",
+        "token": "secret",
+        "cache_dir": str(tmp_path / "hf-cache"),
+    }]
+    assert str(fake_model.device) == "cpu"
+    assert result[["start", "end", "speaker"]].to_dict("records") == [
+        {"start": 0.7, "end": 1.1, "speaker": "SPEAKER_01"}
+    ]
+    assert fake_model.calls[0]["audio"]["waveform"].shape == (1, 16000)
+    assert fake_model.calls[0]["audio"]["sample_rate"] == 16000
+    assert fake_model.calls[0]["min_speakers"] == 2
+    assert fake_model.calls[0]["max_speakers"] == 2
+
+
+def test_exclusive_pipeline_fails_instead_of_silently_using_regular_output(tmp_path):
+    output = SimpleNamespace(speaker_diarization=FakeAnnotation([]))
+    fake_model = FakePyannotePipeline(output)
+    pipeline = ExclusiveDiarizationPipeline(
+        "pyannote/speaker-diarization-community-1",
+        "secret",
+        "cpu",
+        str(tmp_path / "hf-cache"),
+        pipeline_factory=lambda *_args, **_kwargs: fake_model,
+    )
+
+    with pytest.raises(RuntimeError, match="WHISPERX_DIARIZATION_OUTPUT=regular"):
+        pipeline(np.zeros(16000, dtype=np.float32))
+
+
+def test_provider_preserves_exclusive_output_recovery_message(tmp_path):
+    provider = WhisperXTranscriptionProvider(
+        model_dir=tmp_path / "models", diarize=True, hf_token="secret",
+        whisperx_module=FakeWhisperXModule(),
+    )
+
+    def unavailable_exclusive_output(*_args, **_kwargs):
+        raise RuntimeError(
+            "Set WHISPERX_DIARIZATION_OUTPUT=regular to use the regular timeline."
+        )
+
+    provider._diarization_model = unavailable_exclusive_output
+
+    with pytest.raises(RuntimeError, match="WHISPERX_DIARIZATION_OUTPUT=regular"):
+        provider._assign_speakers(FakeWhisperXModule(), {"segments": []}, "audio")
+
+
+def test_diarization_output_defaults_to_exclusive_and_accepts_regular(tmp_path):
+    default_provider = WhisperXTranscriptionProvider(
+        model_dir=tmp_path / "default", diarize=False,
+        whisperx_module=FakeWhisperXModule(),
+    )
+    regular_provider = WhisperXTranscriptionProvider(
+        model_dir=tmp_path / "regular", diarize=False,
+        diarization_output="regular", whisperx_module=FakeWhisperXModule(),
+    )
+
+    assert default_provider.diarization_output == "exclusive"
+    assert regular_provider.diarization_output == "regular"
+
+
+def test_diarization_output_rejects_unknown_mode(tmp_path):
+    with pytest.raises(ValueError, match="WHISPERX_DIARIZATION_OUTPUT"):
+        WhisperXTranscriptionProvider(
+            model_dir=tmp_path / "models", diarize=False,
+            diarization_output="sometimes", whisperx_module=FakeWhisperXModule(),
+        )
+
+
+def test_provider_selects_exclusive_pipeline_by_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "app.providers.transcription.whisperx._verify_pyannote_model_access",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.providers.transcription.whisperx.ExclusiveDiarizationPipeline",
+        FakeDiarizationPipeline,
+    )
+    provider = WhisperXTranscriptionProvider(
+        model_dir=tmp_path / "models", diarize=True, hf_token="secret",
+        whisperx_module=FakeWhisperXModule(),
+    )
+
+    assert isinstance(provider._get_diarization_model(), FakeDiarizationPipeline)
+
+
+def test_provider_selects_regular_pipeline_as_escape_hatch(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "app.providers.transcription.whisperx._verify_pyannote_model_access",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.providers.transcription.whisperx._load_diarization_pipeline_class",
+        lambda: FakeDiarizationPipeline,
+    )
+    provider = WhisperXTranscriptionProvider(
+        model_dir=tmp_path / "models", diarize=True, hf_token="secret",
+        diarization_output="regular", whisperx_module=FakeWhisperXModule(),
+    )
+
+    assert isinstance(provider._get_diarization_model(), FakeDiarizationPipeline)
 
 
 def test_whisperx_provider_quick_readiness_does_not_load_models(tmp_path):
@@ -258,6 +428,7 @@ def test_whisperx_provider_quick_readiness_does_not_load_models(tmp_path):
     result = provider.check_ready(deep=False)
 
     assert result.status == "pass"
+    assert result.details["diarization_output"] == "exclusive"
     assert fake_whisperx.load_model_calls == []
 
 
@@ -271,7 +442,7 @@ def test_whisperx_provider_deep_readiness_does_not_load_models(tmp_path, monkeyp
     )
     monkeypatch.setattr(
         "app.providers.transcription.whisperx._verify_pyannote_model_access",
-        lambda _token: None,
+        lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
         "app.providers.transcription.whisperx._verify_japanese_alignment_revision",
@@ -409,6 +580,35 @@ def test_whisperx_provider_requires_hf_token_for_diarization(tmp_path):
 
     with pytest.raises(RuntimeError, match="HF_TOKEN"):
         provider.transcribe(tmp_path / "audio.wav", "English")
+
+
+def test_pyannote_access_check_uses_community_model_and_cache(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "huggingface_hub.hf_hub_download",
+        lambda **kwargs: calls.append(kwargs),
+    )
+
+    _verify_pyannote_model_access("secret", cache_dir=tmp_path / "hf-cache")
+
+    assert calls == [
+        {
+            "repo_id": "pyannote/speaker-diarization-community-1",
+            "filename": "config.yaml",
+            "token": "secret",
+            "cache_dir": str(tmp_path / "hf-cache"),
+        }
+    ]
+
+
+def test_pyannote_access_check_reports_community_terms(monkeypatch):
+    monkeypatch.setattr(
+        "huggingface_hub.hf_hub_download",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("forbidden")),
+    )
+
+    with pytest.raises(RuntimeError, match="speaker-diarization-community-1"):
+        _verify_pyannote_model_access("secret")
 
 
 def test_whisperx_provider_reports_missing_required_install(monkeypatch, tmp_path):

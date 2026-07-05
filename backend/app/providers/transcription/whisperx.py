@@ -15,6 +15,7 @@ from .base import (
 
 
 _UNSET = object()
+_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 
 
 class WhisperXUnavailableError(RuntimeError):
@@ -23,6 +24,64 @@ class WhisperXUnavailableError(RuntimeError):
 
 class JapaneseAlignmentLoadError(RuntimeError):
     """Raised only when the pinned Japanese forced-alignment model cannot load."""
+
+
+class ExclusiveDiarizationPipeline:
+    """Return Community-1's transcript-friendly exclusive speaker timeline."""
+
+    def __init__(
+        self,
+        model_name,
+        token,
+        device,
+        cache_dir,
+        pipeline_factory=None,
+    ):
+        import torch
+
+        if pipeline_factory is None:
+            from pyannote.audio import Pipeline
+
+            pipeline_factory = Pipeline.from_pretrained
+        self.model = pipeline_factory(
+            model_name,
+            token=token,
+            cache_dir=cache_dir,
+        ).to(torch.device(device))
+
+    def __call__(
+        self,
+        audio,
+        num_speakers=None,
+        min_speakers=None,
+        max_speakers=None,
+    ):
+        import pandas as pd
+        import torch
+
+        output = self.model(
+            {
+                "waveform": torch.from_numpy(audio[None, :]),
+                "sample_rate": 16000,
+            },
+            num_speakers=num_speakers,
+            min_speakers=min_speakers,
+            max_speakers=max_speakers,
+        )
+        diarization = getattr(output, "exclusive_speaker_diarization", None)
+        if diarization is None:
+            raise RuntimeError(
+                "Community-1 did not return exclusive_speaker_diarization. "
+                "Set WHISPERX_DIARIZATION_OUTPUT=regular to use the legacy timeline."
+            )
+
+        diarize_df = pd.DataFrame(
+            diarization.itertracks(yield_label=True),
+            columns=["segment", "label", "speaker"],
+        )
+        diarize_df["start"] = diarize_df["segment"].apply(lambda item: item.start)
+        diarize_df["end"] = diarize_df["segment"].apply(lambda item: item.end)
+        return diarize_df
 
 
 class WhisperXTranscriptionProvider(BaseTranscriptionProvider):
@@ -39,7 +98,9 @@ class WhisperXTranscriptionProvider(BaseTranscriptionProvider):
         batch_size=None,
         model_dir=None,
         diarize=None,
+        diarization_output=None,
         hf_token=None,
+        hf_cache_dir=None,
         whisperx_module=_UNSET,
         diarization_pipeline_class=None,
         japanese_align_loader=None,
@@ -58,8 +119,21 @@ class WhisperXTranscriptionProvider(BaseTranscriptionProvider):
         self.diarize = coerce_bool(
             diarize if diarize is not None else get_setting("WHISPERX_DIARIZE", True)
         )
+        self.diarization_output = str(
+            diarization_output
+            if diarization_output is not None
+            else get_setting("WHISPERX_DIARIZATION_OUTPUT", "exclusive")
+        ).strip().lower()
+        if self.diarization_output not in {"exclusive", "regular"}:
+            raise ValueError(
+                "WHISPERX_DIARIZATION_OUTPUT must be 'exclusive' or 'regular'."
+            )
         token = hf_token if hf_token is not None else get_setting("HF_TOKEN", "")
         self.hf_token = str(token).strip()
+        self.hf_cache_dir = Path(
+            hf_cache_dir
+            or get_setting("HF_HOME", self.model_dir / "huggingface")
+        )
         self.whisperx_module = whisperx_module
         self.diarization_pipeline_class = diarization_pipeline_class
         self.japanese_align_loader = japanese_align_loader or _load_japanese_align_model
@@ -89,7 +163,7 @@ class WhisperXTranscriptionProvider(BaseTranscriptionProvider):
             import matplotlib.pyplot  # noqa: F401
             import pyannote.audio  # noqa: F401
             import torch
-            import torchaudio
+            import torchaudio  # noqa: F401
         except Exception as exc:
             return DiagnosticCheck(
                 "transcription",
@@ -97,12 +171,6 @@ class WhisperXTranscriptionProvider(BaseTranscriptionProvider):
                 f"WhisperX dependency import failed: {exc}",
             )
 
-        if not hasattr(torchaudio, "AudioMetaData"):
-            return DiagnosticCheck(
-                "transcription",
-                FAIL,
-                "Installed TorchAudio is incompatible with pyannote.audio.",
-            )
         if self.device.startswith("cuda") and not torch.cuda.is_available():
             return DiagnosticCheck(
                 "transcription",
@@ -129,8 +197,9 @@ class WhisperXTranscriptionProvider(BaseTranscriptionProvider):
 
         if deep and use_diarization:
             try:
-                _patch_hf_hub_use_auth_token_alias()
-                _verify_pyannote_model_access(self.hf_token)
+                _verify_pyannote_model_access(
+                    self.hf_token, cache_dir=self.hf_cache_dir
+                )
             except Exception as exc:
                 return DiagnosticCheck(
                     "transcription",
@@ -188,6 +257,7 @@ class WhisperXTranscriptionProvider(BaseTranscriptionProvider):
                 "device": self.device,
                 "model_size": self.model_size,
                 "diarization": use_diarization,
+                "diarization_output": self.diarization_output,
                 "versions": versions,
                 "japanese_alignment": {
                     "model": self.ja_align_model,
@@ -350,6 +420,10 @@ class WhisperXTranscriptionProvider(BaseTranscriptionProvider):
         try:
             diarize_segments = diarization_model(audio, **diarization_kwargs)
             return whisperx.assign_word_speakers(diarize_segments, result)
+        except RuntimeError:
+            # Preserve actionable provider errors such as the regular-output
+            # escape hatch for pipelines that do not expose an exclusive timeline.
+            raise
         except Exception as exc:
             raise RuntimeError(
                 "WhisperX diarization failed. Confirm HF_TOKEN has access to the "
@@ -359,17 +433,23 @@ class WhisperXTranscriptionProvider(BaseTranscriptionProvider):
     def _get_diarization_model(self):
         if self._diarization_model is None:
             use_real_pipeline = self.diarization_pipeline_class is None
-            pipeline_class = (
-                self.diarization_pipeline_class or _load_diarization_pipeline_class()
-            )
-            _patch_hf_hub_use_auth_token_alias()
+            if self.diarization_pipeline_class is not None:
+                pipeline_class = self.diarization_pipeline_class
+            elif self.diarization_output == "exclusive":
+                pipeline_class = ExclusiveDiarizationPipeline
+            else:
+                pipeline_class = _load_diarization_pipeline_class()
             if use_real_pipeline:
-                _verify_pyannote_model_access(self.hf_token)
+                _verify_pyannote_model_access(
+                    self.hf_token, cache_dir=self.hf_cache_dir
+                )
 
             try:
                 self._diarization_model = pipeline_class(
-                    use_auth_token=self.hf_token,
+                    model_name=_DIARIZATION_MODEL,
+                    token=self.hf_token,
                     device=self.device,
+                    cache_dir=str(self.hf_cache_dir),
                 )
             except Exception as exc:
                 raise RuntimeError(
@@ -500,53 +580,24 @@ def _load_diarization_pipeline_class():
     return DiarizationPipeline
 
 
-def _patch_hf_hub_use_auth_token_alias():
-    """Support pyannote 3.x calls against newer huggingface-hub releases."""
-    try:
-        import huggingface_hub
-        import pyannote.audio.core.model as pyannote_model
-        import pyannote.audio.core.pipeline as pyannote_pipeline
-    except ImportError:
-        return
-
-    current_download = huggingface_hub.hf_hub_download
-    if getattr(current_download, "_subtitled_accepts_use_auth_token", False):
-        patched_download = current_download
-    else:
-
-        def patched_download(*args, **kwargs):
-            if "use_auth_token" in kwargs and "token" not in kwargs:
-                kwargs["token"] = kwargs.pop("use_auth_token")
-            else:
-                kwargs.pop("use_auth_token", None)
-            return current_download(*args, **kwargs)
-
-        patched_download._subtitled_accepts_use_auth_token = True
-
-    huggingface_hub.hf_hub_download = patched_download
-    pyannote_model.hf_hub_download = patched_download
-    pyannote_pipeline.hf_hub_download = patched_download
-
-
-def _verify_pyannote_model_access(token):
+def _verify_pyannote_model_access(token, cache_dir=None):
     """Fail early with actionable gated-model instructions."""
     try:
         from huggingface_hub import hf_hub_download
     except ImportError:
         return
 
-    required_files = [
-        ("pyannote/speaker-diarization-3.1", "config.yaml"),
-        ("pyannote/segmentation-3.0", "pytorch_model.bin"),
-    ]
-    for repo_id, filename in required_files:
-        try:
-            hf_hub_download(repo_id=repo_id, filename=filename, token=token)
-        except Exception as exc:
-            raise RuntimeError(
-                "HF_TOKEN cannot download required pyannote diarization files. "
-                "Accept the user conditions for both "
-                "https://huggingface.co/pyannote/speaker-diarization-3.1 and "
-                "https://huggingface.co/pyannote/segmentation-3.0, then restart "
-                "the worker and retry."
-            ) from exc
+    try:
+        hf_hub_download(
+            repo_id=_DIARIZATION_MODEL,
+            filename="config.yaml",
+            token=token,
+            cache_dir=str(cache_dir) if cache_dir else None,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "HF_TOKEN cannot download the pyannote Community-1 diarization model. "
+            "Accept the user conditions at "
+            "https://huggingface.co/pyannote/speaker-diarization-community-1, "
+            "then restart the worker and retry."
+        ) from exc
