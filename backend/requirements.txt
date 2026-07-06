@@ -1,6 +1,6 @@
 celery==5.4.0
 accelerate==1.14.0
-ctranslate2==4.4.0
+ctranslate2==4.6.0
 faster-whisper==1.2.1
 Flask==3.0.3
 Flask-Cors==4.0.1
@@ -8,15 +8,17 @@ Flask-SQLAlchemy==3.1.1
 matplotlib==3.10.9
 omegaconf==2.3.0
 psycopg2-binary==2.9.9
-pyannote.audio==3.3.2
+pyannote.audio==4.0.7
 pytest==8.3.3
 redis==5.0.8
 sentencepiece==0.2.1
 SQLAlchemy==2.0.35
-# WhisperX 3.4.2 expects pyannote's pre-4.x use_auth_token API, and
-# pyannote 3.3.x expects the TorchAudio 2.5 metadata API.
-torch==2.5.1
-torchaudio==2.5.1
+# WhisperX 3.8.6 and pyannote.audio 4 use the Community-1 diarization stack.
+# Keep the Torch family and TorchCodec on WhisperX's tested compatible versions.
+torch==2.8.0
+torchaudio==2.8.0
+torchcodec==0.7.0
+torchvision==0.23.0
 transformers==4.57.6
 Werkzeug==3.0.4
-whisperx==3.4.2
+whisperx==3.8.6

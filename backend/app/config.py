@@ -57,6 +57,9 @@ class Config:
     WHISPER_MODEL_DIR = Path(os.getenv("WHISPER_MODEL_DIR", STORAGE_DIR / "models"))
     WHISPERX_BATCH_SIZE = int(os.getenv("WHISPERX_BATCH_SIZE", "16"))
     WHISPERX_DIARIZE = _bool_env("WHISPERX_DIARIZE", False)
+    WHISPERX_DIARIZATION_OUTPUT = os.getenv(
+        "WHISPERX_DIARIZATION_OUTPUT", "exclusive"
+    )
     WHISPER_MODEL_CACHE_SIZE = int(os.getenv("WHISPER_MODEL_CACHE_SIZE", "1"))
     WHISPERX_JA_ALIGN_MODEL = os.getenv(
         "WHISPERX_JA_ALIGN_MODEL", "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
