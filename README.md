@@ -1,6 +1,6 @@
 # SubtitleD
 
-SubtitleD is an MVP subtitle translation web app. It extracts aligned WhisperX words, uses deterministic readable caption boundaries, translates semantic units with HY-MT2 through local KoboldCpp, keeps the raw transcript visible for auditing, and produces editable subtitles, SRT exports, and rendered video. NLLB and LibreTranslate remain local fallbacks.
+SubtitleD is an MVP subtitle translation web app. It extracts aligned WhisperX words, uses deterministic readable caption boundaries, lets each project choose a translation engine, keeps the raw transcript visible for auditing, and produces editable subtitles, SRT exports, and rendered video. Supported local engines are HY-MT2 through KoboldCpp, NLLB through CTranslate2, and LibreTranslate.
 
 ## Tech Stack
 
@@ -26,12 +26,12 @@ SubtitleD is an MVP subtitle translation web app. It extracts aligned WhisperX w
    docker compose up --build
    ```
 
-3. Load `tencent/Hy-MT2-7B-GGUF` in a current KoboldCpp build on host port
+3. To use the KoboldCpp engine, load `tencent/Hy-MT2-7B-GGUF` in a current KoboldCpp build on host port
    `5002`. The Q4_K_M and Q6_K variants are practical local defaults. SubtitleD
    sends translation prompts and per-project sampling settings to its
    OpenAI-compatible `/v1/chat/completions` endpoint.
 
-4. Install the local NLLB fallback explicitly. This downloads and
+4. To use the local NLLB engine, install it explicitly. This downloads and
    converts the pinned 600M checkpoint to CTranslate2 INT8 and stores it in the
    persistent model directory:
 
@@ -168,8 +168,8 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 - `TORCH_HOME`: Persistent PyTorch cache directory, default `/app/storage/models/torch`
 - `XDG_CACHE_HOME`: Persistent cache directory, default `/app/storage/models/cache`
 - `HF_TOKEN`: Hugging Face `read` token used by WhisperX diarization; the token account must have accepted the Community-1 model conditions
-- `TRANSLATION_PROVIDER`: `routed` (recommended), `nllb-ct2`, `libretranslate`, or `mock`
-- `TRANSLATION_DEFAULT_PROVIDER`: Provider used when no language-pair route matches
+- `TRANSLATION_PROVIDER`: Server-level provider mode for legacy/default checks; `routed`, `nllb-ct2`, `libretranslate`, `hy-mt2`, or `mock`
+- `TRANSLATION_DEFAULT_PROVIDER`: Default project translation engine and routed-provider fallback, default `hy-mt2`
 - `TRANSLATION_ROUTE_OVERRIDES`: Optional comma-separated routes such as `ja>en=libretranslate`
 - `LIBRETRANSLATE_URL`: LibreTranslate API base URL, default Docker service URL
 - `LIBRETRANSLATE_API_KEY`: Optional API key for protected LibreTranslate instances
@@ -206,7 +206,7 @@ The Docker Compose file provides sensible defaults. You can override these in `.
 
 LibreTranslate is left without `LT_LOAD_ONLY`, so it installs all available
 language models. The first startup can therefore take substantially longer and
-use more disk space. The project form reads the running provider's `/languages`
+use more disk space. The project form reads the selected provider's `/languages`
 catalog and only displays models that are actually available. The web app starts
 while LibreTranslate is loading; project processing remains unavailable until
 the translation service is ready.
@@ -257,10 +257,12 @@ Celery control ping remains as a startup and backward-compatibility fallback.
 ## API Endpoints
 
 - `GET /api/diagnostics`: Check runtime subsystem readiness; supports `deep` and `refresh`
-- `GET /api/translation/settings`: Get default HY-MT2 sampling settings
+- `GET /api/languages`: Get languages for the configured provider; accepts `provider=hy-mt2-kobold`, `provider=nllb-ct2`, or `provider=libretranslate`
+- `GET /api/translation/settings`: Get provider options and default HY-MT2 sampling settings
 - `POST /api/projects`: Create a project
 - `GET /api/projects`: List projects
 - `GET /api/projects/<project_id>`: Get project metadata
+- `PATCH /api/projects/<project_id>`: Update project options, including an atomic `translation_provider` and `target_language` selection
 - `POST /api/projects/<project_id>/video`: Upload a video file
 - `POST /api/projects/<project_id>/process`: Start transcription and translation
 - `GET /api/projects/<project_id>/segments`: List subtitle segments
@@ -284,7 +286,9 @@ The app keeps transcription and translation behind small interfaces so provider 
   non-fatal warning. Other alignment errors remain fatal.
 - Set `HF_TOKEN` to a Hugging Face read token for projects that enable speaker detection.
 - Mock translation prefixes visible language labels and applies a tiny dictionary for common demo languages.
-- `TRANSLATION_PROVIDER=hy-mt2` or the default routed provider sends semantic source units to HY-MT2 through KoboldCpp.
+- Projects store a `translation_provider` value of `hy-mt2-kobold`, `nllb-ct2`, or `libretranslate`; the selected engine is used the next time the project is processed.
+- Changing a processed project's translation engine or target language preserves its existing captions for review, invalidates generated exports, and requires reprocessing before export or rendering.
+- `TRANSLATION_PROVIDER=hy-mt2` or the default routed provider sends semantic source units to HY-MT2 through KoboldCpp when no per-project provider is available.
 
 Whisper is used for transcription only. Subtitle translation is handled separately because Whisper's built-in translation mode translates speech to English rather than arbitrary target languages.
 
@@ -303,7 +307,9 @@ context, but HY-MT2 never controls timestamps. Empty, untranslated, repetitive,
 explanatory, or unreasonably long responses are rejected. SubtitleD then falls
 back to the revision-pinned NLLB-200 distilled 600M CTranslate2 model and finally
 LibreTranslate. This is a conservative quality gate, not a semantic quality
-score. Each API segment exposes
+score. Projects that select NLLB use the same local NLLB primary with
+LibreTranslate fallback, while projects that select LibreTranslate call
+LibreTranslate directly. Each API segment exposes
 translator/model provenance, reconstruction provenance, translation-unit ID,
 timing quality, and low-confidence warnings.
 

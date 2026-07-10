@@ -43,6 +43,8 @@ class Project(db.Model):
     translation_repetition_penalty = db.Column(db.Float, nullable=False, default=1.05)
     translation_max_tokens = db.Column(db.Integer, nullable=False, default=256)
     translation_context_captions = db.Column(db.Integer, nullable=False, default=2)
+    translation_provider = db.Column(db.String(64), nullable=False, default="hy-mt2-kobold")
+    translation_needs_reprocessing = db.Column(db.Boolean, nullable=False, default=False)
     detect_speakers = db.Column(db.Boolean, nullable=False, default=False)
     smooth_speaker_fragments = db.Column(db.Boolean, nullable=False, default=False)
     source_language = db.Column(db.String(64), nullable=False)
@@ -80,6 +82,8 @@ class Project(db.Model):
             "processing_warning": self.processing_warning,
             "translation_progress": {"completed": completed, "total": total},
             "glossary": self.glossary or "",
+            "translation_provider": self.translation_provider or "hy-mt2-kobold",
+            "translation_needs_reprocessing": bool(self.translation_needs_reprocessing),
             "translation_settings": {
                 "temperature": self.translation_temperature,
                 "top_p": self.translation_top_p,

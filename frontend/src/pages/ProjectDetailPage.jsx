@@ -59,7 +59,8 @@ export default function ProjectDetailPage() {
   if (!projectId) return null;
   if (!project) return <main className="page-shell"><div className="panel empty-state">Loading project...</div></main>;
 
-  const canUseSegments = project.status === "processed" || project.status === "rendered";
+  const hasSegments = project.status === "processed" || project.status === "rendered";
+  const canPublishSegments = hasSegments && !project.translation_needs_reprocessing;
   const progress = project.translation_progress || { completed: 0, total: 0 };
   const downloadUrl = absoluteFileUrl(project.download_url);
   const srtUrl = absoluteFileUrl(project.srt_download_url);
@@ -78,6 +79,11 @@ export default function ProjectDetailPage() {
       {error ? <div className="notice error">{error}</div> : null}
       {project.error_message ? <div className="notice error">{project.error_message}</div> : null}
       {project.processing_warning ? <div className="notice warning">{project.processing_warning}</div> : null}
+      {project.translation_needs_reprocessing ? (
+        <div className="notice warning">
+          The translation engine or target language changed. Reprocess the video before exporting or rendering.
+        </div>
+      ) : null}
       {isActiveJob(project) ? (
         <div className="notice progress-notice">
           {stageLabel(project.processing_stage)}
@@ -89,10 +95,10 @@ export default function ProjectDetailPage() {
         <button onClick={() => runAction("Process video", () => processProject(project.id))} disabled={!project.source_video_url || isActiveJob(project) || busyAction !== null}>
           {busyAction === "Process video" ? "Starting..." : "Process Video"}
         </button>
-        <button onClick={() => runAction("Export SRT", () => exportProjectSrt(project.id))} disabled={!canUseSegments || isActiveJob(project) || busyAction !== null}>
+        <button onClick={() => runAction("Export SRT", () => exportProjectSrt(project.id))} disabled={!canPublishSegments || isActiveJob(project) || busyAction !== null}>
           {busyAction === "Export SRT" ? "Exporting..." : "Export SRT"}
         </button>
-        <button onClick={() => runAction("Render video", () => renderProject(project.id))} disabled={!canUseSegments || isActiveJob(project) || busyAction !== null}>
+        <button onClick={() => runAction("Render video", () => renderProject(project.id))} disabled={!canPublishSegments || isActiveJob(project) || busyAction !== null}>
           {busyAction === "Render video" ? "Starting..." : "Render Subtitled Video"}
         </button>
         {srtUrl ? <a className="button-link" href={srtUrl}>Download SRT</a> : null}
@@ -103,7 +109,7 @@ export default function ProjectDetailPage() {
         <VideoPreview project={project} />
         <ProjectMeta project={project} onProjectChange={loadProject} />
       </section>
-      <SubtitleEditor projectId={project.id} enabled={canUseSegments} />
+      <SubtitleEditor projectId={project.id} enabled={hasSegments} />
     </main>
   );
 }
