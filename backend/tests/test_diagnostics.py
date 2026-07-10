@@ -284,6 +284,61 @@ def test_process_endpoint_blocks_queueing_when_preflight_fails(client, app, monk
         assert db.session.get(Project, project_id).status == ProjectStatus.UPLOADED
 
 
+def test_process_preflight_uses_project_translation_provider(app, monkeypatch):
+    with app.app_context():
+        source = Path(app.config["STORAGE_DIR"]) / "uploads" / "source.mp4"
+        source.write_bytes(b"video")
+        project = Project(
+            title="Demo",
+            source_language="en",
+            target_language="es",
+            source_video_path=str(source),
+            translation_provider="nllb-ct2",
+            status=ProjectStatus.UPLOADED,
+        )
+
+        monkeypatch.setattr(
+            diagnostics_module,
+            "check_database",
+            lambda: DiagnosticCheck("database", "pass", "ready"),
+        )
+        monkeypatch.setattr(
+            diagnostics_module,
+            "check_redis",
+            lambda: DiagnosticCheck("redis", "pass", "ready"),
+        )
+        monkeypatch.setattr(
+            diagnostics_module,
+            "check_storage",
+            lambda: DiagnosticCheck("storage", "pass", "ready"),
+        )
+        monkeypatch.setattr(
+            diagnostics_module,
+            "check_ffmpeg",
+            lambda require_subtitles=False: DiagnosticCheck("ffmpeg", "pass", "ready"),
+        )
+        monkeypatch.setattr(
+            diagnostics_module,
+            "check_transcription_provider",
+            lambda deep=False, diarize=False: DiagnosticCheck("transcription", "pass", "ready"),
+        )
+        calls = []
+
+        def check_translation_provider(source_language=None, target_language=None, provider_name=None):
+            calls.append((source_language, target_language, provider_name))
+            return DiagnosticCheck("translation", "pass", "ready")
+
+        monkeypatch.setattr(
+            diagnostics_module,
+            "check_translation_provider",
+            check_translation_provider,
+        )
+
+        diagnostics_module.run_job_preflight("process", project, include_worker=False)
+
+    assert calls == [("en", "es", "nllb-ct2")]
+
+
 def test_render_endpoint_blocks_queueing_when_preflight_fails(client, app, monkeypatch):
     with app.app_context():
         source = Path(app.config["STORAGE_DIR"]) / "uploads" / "source.mp4"

@@ -85,6 +85,8 @@ def _upgrade_dev_schema():
             "translation_repetition_penalty": "FLOAT DEFAULT 1.05",
             "translation_max_tokens": "INTEGER DEFAULT 256",
             "translation_context_captions": "INTEGER DEFAULT 2",
+            "translation_provider": "VARCHAR(64) DEFAULT 'hy-mt2-kobold'",
+            "translation_needs_reprocessing": "BOOLEAN DEFAULT FALSE",
             "detected_source_language": "VARCHAR(32)",
             "detect_speakers": "BOOLEAN DEFAULT FALSE",
             "smooth_speaker_fragments": "BOOLEAN DEFAULT FALSE",

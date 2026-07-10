@@ -11,6 +11,68 @@ from .translation_languages import language_catalog, normalize_language as _norm
 
 _MOCK_LANGUAGES = language_catalog()
 
+PROJECT_TRANSLATION_PROVIDERS = (
+    {
+        "id": "hy-mt2-kobold",
+        "label": "Local KoboldCpp / HY-MT2",
+        "supports_generation_settings": True,
+    },
+    {
+        "id": "nllb-ct2",
+        "label": "Local NLLB",
+        "supports_generation_settings": False,
+    },
+    {
+        "id": "libretranslate",
+        "label": "LibreTranslate",
+        "supports_generation_settings": False,
+    },
+)
+
+_PROJECT_PROVIDER_IDS = {provider["id"] for provider in PROJECT_TRANSLATION_PROVIDERS}
+_PROVIDER_ALIASES = {
+    "hy-mt": "hy-mt2-kobold",
+    "hy-mt2": "hy-mt2-kobold",
+    "kobold": "hy-mt2-kobold",
+    "koboldcpp": "hy-mt2-kobold",
+    "kobold-hy-mt2": "hy-mt2-kobold",
+    "local-kobold": "hy-mt2-kobold",
+    "nllb": "nllb-ct2",
+    "local": "nllb-ct2",
+    "local-nllb": "nllb-ct2",
+    "libre_translate": "libretranslate",
+    "libre-translate": "libretranslate",
+}
+
+_LIBRETRANSLATE_CODE_OVERRIDES = {
+    "zh": "zh-Hans",
+    "zh-tw": "zh-Hant",
+    "pt-br": "pt-BR",
+    "no": "nb",
+}
+
+
+def translation_provider_options():
+    return [dict(provider) for provider in PROJECT_TRANSLATION_PROVIDERS]
+
+
+def normalize_project_translation_provider(value):
+    provider = str(value or "").strip().lower()
+    provider = _PROVIDER_ALIASES.get(provider, provider)
+    return provider if provider in _PROJECT_PROVIDER_IDS else None
+
+
+def default_project_translation_provider():
+    configured_default = normalize_project_translation_provider(
+        _setting("TRANSLATION_DEFAULT_PROVIDER", "hy-mt2-kobold")
+    )
+    if configured_default:
+        return configured_default
+    configured_provider = normalize_project_translation_provider(
+        _setting("TRANSLATION_PROVIDER", "")
+    )
+    return configured_provider or "hy-mt2-kobold"
+
 
 class BaseTranslationProvider:
     """Interface for text translation implementations."""
@@ -104,7 +166,23 @@ class LibreTranslateProvider(BaseTranslationProvider):
         )
 
     def get_languages(self):
-        """Return LibreTranslate's live list of installed language models."""
+        """Return installed languages using SubtitleD's canonical codes."""
+        languages = []
+        for language in self._get_native_languages():
+            code = normalize_language(language["code"]) or language["code"]
+            targets = [
+                normalize_language(target) or target
+                for target in language["targets"]
+            ]
+            languages.append({
+                "code": code,
+                "name": language["name"],
+                "targets": list(dict.fromkeys(targets)),
+            })
+        return languages
+
+    def _get_native_languages(self):
+        """Return LibreTranslate's provider-native installed language catalog."""
         request = Request(f"{self.base_url}/languages", method="GET")
         try:
             with urlopen(request, timeout=min(self.timeout_seconds, 5)) as response:
@@ -119,22 +197,24 @@ class LibreTranslateProvider(BaseTranslationProvider):
             if not isinstance(language, dict) or not language.get("code"):
                 continue
             code = str(language["code"])
+            raw_targets = language.get("targets")
             languages.append(
                 {
                     "code": code,
                     "name": str(language.get("name") or code),
                     "targets": [
                         str(target)
-                        for target in language.get("targets", [])
+                        for target in (raw_targets or [])
                         if target
                     ],
+                    "targets_known": isinstance(raw_targets, list),
                 }
             )
         return sorted(languages, key=lambda language: language["name"].casefold())
 
     def check_ready(self, source_language=None, target_language=None):
         """Confirm the service is reachable and required languages are installed."""
-        target_code = normalize_language(target_language) if target_language else None
+        target_code = _libretranslate_language_code(target_language) if target_language else None
         if target_language and not target_code:
             return DiagnosticCheck(
                 "translation",
@@ -143,7 +223,7 @@ class LibreTranslateProvider(BaseTranslationProvider):
             )
 
         try:
-            languages = self.get_languages()
+            languages = self._get_native_languages()
         except RuntimeError:
             return DiagnosticCheck(
                 "translation",
@@ -159,7 +239,7 @@ class LibreTranslateProvider(BaseTranslationProvider):
                 f"LibreTranslate does not have the {target_code} target language loaded.",
                 {"available_languages": available},
             )
-        source_code = normalize_language(source_language) if source_language else None
+        source_code = _libretranslate_language_code(source_language) if source_language else None
         if source_code and source_code != "auto" and source_code not in available:
             return DiagnosticCheck(
                 "translation",
@@ -167,6 +247,25 @@ class LibreTranslateProvider(BaseTranslationProvider):
                 f"LibreTranslate does not have the {source_code} source language loaded.",
                 {"available_languages": available},
             )
+        if source_code and source_code != "auto" and target_code and source_code != target_code:
+            source = next(
+                (language for language in languages if language["code"] == source_code),
+                None,
+            )
+            supported_targets = source["targets"] if source else []
+            if source and source["targets_known"] and target_code not in supported_targets:
+                return DiagnosticCheck(
+                    "translation",
+                    FAIL,
+                    (
+                        "LibreTranslate does not support translation from "
+                        f"{source_code} to {target_code}."
+                    ),
+                    {
+                        "source_language": source_code,
+                        "available_targets": supported_targets,
+                    },
+                )
         return DiagnosticCheck(
             "translation",
             PASS,
@@ -176,11 +275,11 @@ class LibreTranslateProvider(BaseTranslationProvider):
 
     def translate(self, text, source_language, target_language):
         """Translate text using LibreTranslate's `/translate` endpoint."""
-        target_code = normalize_language(target_language)
+        target_code = _libretranslate_language_code(target_language)
         if not target_code:
             raise ValueError(f"Unsupported target language for translation: {target_language}")
 
-        source_code = normalize_language(source_language) or "auto"
+        source_code = _libretranslate_language_code(source_language) or "auto"
         payload = {
             "q": text,
             "source": source_code,
@@ -264,12 +363,14 @@ class RoutedTranslationProvider(BaseTranslationProvider):
         return provider.translate_with_metadata(text, source_language, target_language)
 
 
-def get_translation_provider(settings=None):
+def get_translation_provider(settings=None, provider_name=None):
     """Select the configured translation provider.
 
     This is the extension point for a real translation service once credentials
     and provider-specific settings are introduced.
     """
+    if provider_name:
+        return _provider_by_name(provider_name, settings)
     provider = str(_setting("TRANSLATION_PROVIDER", "routed")).strip().lower()
     if provider in {"routed", "auto", "local-routed"}:
         return RoutedTranslationProvider(
@@ -347,6 +448,11 @@ def _parse_route_overrides(value):
 def normalize_language(language):
     """Normalize common language labels to application language codes."""
     return _normalize_language(language)
+
+
+def _libretranslate_language_code(language):
+    code = normalize_language(language)
+    return _LIBRETRANSLATE_CODE_OVERRIDES.get(code, code)
 
 
 def _setting(name, default):

@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import {
   createProject,
+  DEFAULT_TRANSLATION_PROVIDERS,
   deleteProject,
   getTranslationSettings,
   listLanguages,
@@ -10,13 +11,19 @@ import {
   uploadProjectVideo
 } from "../api";
 import StatusPill from "../components/StatusPill";
+import { targetLanguagesFor } from "../translationLanguages";
 import "./ProjectCreationPage.css";
+
+const LANGUAGE_LOAD_ERROR = "Could not load the selected translation provider's languages.";
 
 export default function ProjectCreationPage() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [languages, setLanguages] = useState([]);
+  const [languagesLoading, setLanguagesLoading] = useState(false);
   const [title, setTitle] = useState("");
+  const [translationProvider, setTranslationProvider] = useState("hy-mt2-kobold");
+  const [translationProviders, setTranslationProviders] = useState(DEFAULT_TRANSLATION_PROVIDERS);
   const [sourceLanguage, setSourceLanguage] = useState("");
   const [targetLanguage, setTargetLanguage] = useState("");
   const [minSpeakers, setMinSpeakers] = useState("");
@@ -39,25 +46,72 @@ export default function ProjectCreationPage() {
 
   useEffect(() => {
     listProjects().then(setProjects).catch(() => setProjects([]));
-    listLanguages()
-      .then((availableLanguages) => {
-        setLanguages(availableLanguages);
-        const codes = new Set(availableLanguages.map((language) => language.code));
-        setSourceLanguage(codes.has("en") ? "en" : availableLanguages[0]?.code || "");
-        setTargetLanguage(codes.has("es") ? "es" : availableLanguages[1]?.code || "");
-      })
-      .catch(() => setError("Could not load the translation provider's languages."));
     getTranslationSettings()
-      .then((settings) => setTranslationSettings({
-        temperature: String(settings.temperature),
-        top_p: String(settings.top_p),
-        top_k: String(settings.top_k),
-        repetition_penalty: String(settings.repetition_penalty),
-        max_tokens: String(settings.max_tokens),
-        context_captions: String(settings.context_captions)
-      }))
+      .then((settings) => {
+        setTranslationProvider(settings.provider || "hy-mt2-kobold");
+        setTranslationProviders(
+          settings.providers?.length ? settings.providers : DEFAULT_TRANSLATION_PROVIDERS
+        );
+        setTranslationSettings({
+          temperature: String(settings.temperature),
+          top_p: String(settings.top_p),
+          top_k: String(settings.top_k),
+          repetition_penalty: String(settings.repetition_penalty),
+          max_tokens: String(settings.max_tokens),
+          context_captions: String(settings.context_captions)
+        });
+      })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (!translationProvider) {
+      return undefined;
+    }
+    let active = true;
+    setLanguagesLoading(true);
+    setLanguages([]);
+    listLanguages(translationProvider)
+      .then((availableLanguages) => {
+        if (!active) {
+          return;
+        }
+        setLanguages(availableLanguages);
+        const codes = new Set(availableLanguages.map((language) => language.code));
+        setSourceLanguage((current) => {
+          if (current === "auto" || codes.has(current)) {
+            return current;
+          }
+          return codes.has("en") ? "en" : availableLanguages[0]?.code || "";
+        });
+        setLanguagesLoading(false);
+        setError((current) => current === LANGUAGE_LOAD_ERROR ? null : current);
+      })
+      .catch(() => {
+        if (active) {
+          setLanguages([]);
+          setLanguagesLoading(false);
+          setError(LANGUAGE_LOAD_ERROR);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [translationProvider]);
+
+  useEffect(() => {
+    if (languagesLoading || !languages.length) {
+      return;
+    }
+    const availableTargets = targetLanguagesFor(languages, sourceLanguage);
+    const targetCodes = new Set(availableTargets.map((language) => language.code));
+    setTargetLanguage((current) => {
+      if (targetCodes.has(current)) {
+        return current;
+      }
+      return targetCodes.has("es") ? "es" : availableTargets[0]?.code || "";
+    });
+  }, [languages, languagesLoading, sourceLanguage]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -71,6 +125,7 @@ export default function ProjectCreationPage() {
     try {
       const payload = {
         title,
+        translation_provider: translationProvider,
         source_language: sourceLanguage,
         target_language: targetLanguage,
         glossary,
@@ -121,6 +176,16 @@ export default function ProjectCreationPage() {
     }
   }
 
+  const showGenerationSettings = translationProvider === "hy-mt2-kobold";
+  const targetLanguages = targetLanguagesFor(languages, sourceLanguage);
+  const sourceLanguageAvailable = (
+    sourceLanguage === "auto"
+    || languages.some((language) => language.code === sourceLanguage)
+  );
+  const targetLanguageAvailable = targetLanguages.some(
+    (language) => language.code === targetLanguage
+  );
+
   return (
     <main className="page-shell">
       <section className="workspace-grid">
@@ -143,11 +208,27 @@ export default function ProjectCreationPage() {
             />
           </label>
 
+          <label>
+            <span>Translation engine</span>
+            <select
+              value={translationProvider}
+              onChange={(event) => setTranslationProvider(event.target.value)}
+              required
+            >
+              {translationProviders.map((provider) => (
+                <option value={provider.id} key={provider.id}>
+                  {provider.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <div className="form-row">
             <label>
               <span>Source language</span>
               <select
                 value={sourceLanguage}
+                disabled={languagesLoading}
                 onChange={(event) => setSourceLanguage(event.target.value)}
                 required
               >
@@ -164,11 +245,12 @@ export default function ProjectCreationPage() {
               <span>Target language</span>
               <select
                 value={targetLanguage}
+                disabled={languagesLoading}
                 onChange={(event) => setTargetLanguage(event.target.value)}
                 required
               >
                 <option value="" disabled>Select a language</option>
-                {languages.map((language) => (
+                {targetLanguages.map((language) => (
                   <option value={language.code} key={language.code}>
                     {language.name} ({language.code})
                   </option>
@@ -197,18 +279,22 @@ export default function ProjectCreationPage() {
           </label>
 
           <details className="advanced-settings">
-            <summary>HY-MT2 translation settings</summary>
-            <small>These values are sent with each KoboldCpp translation request.</small>
+            <summary>{showGenerationSettings ? "KoboldCpp translation settings" : "Translation settings"}</summary>
+            {showGenerationSettings ? (
+              <>
+                <small>These values are sent with each KoboldCpp translation request.</small>
+                <div className="form-row">
+                  <TranslationSetting label="Temperature" name="temperature" min="0" max="2" step="0.05" values={translationSettings} setValues={setTranslationSettings} />
+                  <TranslationSetting label="Top-p" name="top_p" min="0.01" max="1" step="0.01" values={translationSettings} setValues={setTranslationSettings} />
+                </div>
+                <div className="form-row">
+                  <TranslationSetting label="Top-k" name="top_k" min="0" max="500" step="1" values={translationSettings} setValues={setTranslationSettings} />
+                  <TranslationSetting label="Repetition penalty" name="repetition_penalty" min="0.5" max="2" step="0.01" values={translationSettings} setValues={setTranslationSettings} />
+                </div>
+              </>
+            ) : null}
             <div className="form-row">
-              <TranslationSetting label="Temperature" name="temperature" min="0" max="2" step="0.05" values={translationSettings} setValues={setTranslationSettings} />
-              <TranslationSetting label="Top-p" name="top_p" min="0.01" max="1" step="0.01" values={translationSettings} setValues={setTranslationSettings} />
-            </div>
-            <div className="form-row">
-              <TranslationSetting label="Top-k" name="top_k" min="0" max="500" step="1" values={translationSettings} setValues={setTranslationSettings} />
-              <TranslationSetting label="Repetition penalty" name="repetition_penalty" min="0.5" max="2" step="0.01" values={translationSettings} setValues={setTranslationSettings} />
-            </div>
-            <div className="form-row">
-              <TranslationSetting label="Maximum output tokens" name="max_tokens" min="16" max="2048" step="1" values={translationSettings} setValues={setTranslationSettings} />
+              {showGenerationSettings ? <TranslationSetting label="Maximum output tokens" name="max_tokens" min="16" max="2048" step="1" values={translationSettings} setValues={setTranslationSettings} /> : null}
               <TranslationSetting label="Context captions" name="context_captions" min="0" max="5" step="1" values={translationSettings} setValues={setTranslationSettings} />
             </div>
           </details>
@@ -263,7 +349,12 @@ export default function ProjectCreationPage() {
           <button
             className="primary-action"
             disabled={
-              submitting || !title.trim() || !sourceLanguage || !targetLanguage
+              submitting
+              || languagesLoading
+              || !languages.length
+              || !title.trim()
+              || !sourceLanguageAvailable
+              || !targetLanguageAvailable
             }
           >
             {submitting ? "Creating..." : "Create and Upload"}

@@ -10,7 +10,10 @@ from .providers import (
     get_transcription_provider,
     get_translation_provider,
 )
-from .providers.translation import normalize_language as normalize_translation_language
+from .providers.translation import (
+    default_project_translation_provider,
+    normalize_language as normalize_translation_language,
+)
 from .utils.captions import flatten_transcript_words
 from .utils.caption_translation import iter_deterministic_translation
 from .utils.source_reconstruction import reconstruct_source_words
@@ -97,6 +100,7 @@ def process_video_task(project_id):
         project.output_video_path = None
         project.status = ProjectStatus.PROCESSED
         project.processing_stage = "complete"
+        project.translation_needs_reprocessing = False
         project.translation_completed_words = len(words)
         project.processing_warning = _warning_text(warnings)
         db.session.commit()
@@ -121,7 +125,12 @@ def _translate_words(project, words):
     translator = (
         _IdentityTranslationProvider()
         if same_language
-        else get_translation_provider(_project_translation_settings(project))
+        else get_translation_provider(
+            _project_translation_settings(project),
+            provider_name=(
+                project.translation_provider or default_project_translation_provider()
+            ),
+        )
     )
     if not same_language and hasattr(translator, "check_ready"):
         readiness = translator.check_ready(

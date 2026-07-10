@@ -142,6 +142,7 @@ def run_job_preflight(job_type, project, include_worker=True):
             checks.append(check_translation_provider(
                 source_language=getattr(project, "source_language", None),
                 target_language=getattr(project, "target_language", None),
+                provider_name=getattr(project, "translation_provider", None),
             ))
     elif job_type == "render":
         checks.extend(
@@ -375,11 +376,11 @@ def check_transcription_provider(deep=False, load_models=False, diarize=None):
         )
 
 
-def check_translation_provider(source_language=None, target_language=None):
+def check_translation_provider(source_language=None, target_language=None, provider_name=None):
     try:
         from .providers import get_translation_provider
 
-        provider = get_translation_provider()
+        provider = get_translation_provider(provider_name=provider_name)
         return provider.check_ready(
             source_language=source_language,
             target_language=target_language,

@@ -11,6 +11,8 @@
  * @property {string|null} processing_warning
  * @property {{completed:number,total:number}} translation_progress
  * @property {string} glossary
+ * @property {string} translation_provider
+ * @property {boolean} translation_needs_reprocessing
  * @property {{temperature:number,top_p:number,top_k:number,repetition_penalty:number,max_tokens:number,context_captions:number}} translation_settings
  * @property {boolean} detect_speakers
  * @property {boolean} smooth_speaker_fragments
@@ -65,6 +67,24 @@ export const API_BASE = (
 ).replace(/\/$/, "");
 
 const API_ORIGIN = API_BASE.replace(/\/api$/, "");
+
+export const DEFAULT_TRANSLATION_PROVIDERS = [
+  {
+    id: "hy-mt2-kobold",
+    label: "Local KoboldCpp / HY-MT2",
+    supports_generation_settings: true
+  },
+  {
+    id: "nllb-ct2",
+    label: "Local NLLB",
+    supports_generation_settings: false
+  },
+  {
+    id: "libretranslate",
+    label: "LibreTranslate",
+    supports_generation_settings: false
+  }
+];
 
 /**
  * Shared JSON request helper.
@@ -137,8 +157,9 @@ export async function deleteProject(projectId) {
 }
 
 /** Return languages currently available from the configured translation provider. */
-export function listLanguages() {
-  return apiRequest("/languages");
+export function listLanguages(provider) {
+  const query = provider ? `?provider=${encodeURIComponent(provider)}` : "";
+  return apiRequest(`/languages${query}`);
 }
 
 /** Return server defaults for per-project HY-MT2 generation settings. */

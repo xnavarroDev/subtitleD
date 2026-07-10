@@ -7,6 +7,12 @@ from .diagnostics import PreflightError, require_job_preflight, run_system_diagn
 from .extensions import db
 from .models import Project, ProjectStatus, SubtitleSegment, TranscriptWordRecord
 from .providers import get_translation_provider
+from .providers.translation import (
+    default_project_translation_provider,
+    normalize_language as normalize_translation_language,
+    normalize_project_translation_provider,
+    translation_provider_options,
+)
 from .utils.files import save_video_upload
 from .utils.srt import generate_srt
 
@@ -31,6 +37,9 @@ def create_project():
         min_speakers=_parse_optional_int(payload.get("min_speakers"), "min_speakers"),
         max_speakers=_parse_optional_int(payload.get("max_speakers"), "max_speakers"),
         glossary=str(payload.get("glossary") or "").strip() or None,
+        translation_provider=_parse_translation_provider(
+            payload.get("translation_provider")
+        ),
         detect_speakers=_parse_bool_value(payload.get("detect_speakers", False)),
         smooth_speaker_fragments=_parse_bool_value(
             payload.get("smooth_speaker_fragments", False)
@@ -57,16 +66,25 @@ def list_projects():
 
 @api_bp.get("/languages")
 def list_languages():
+    provider_name = None
+    if "provider" in request.args:
+        provider_name = _parse_translation_provider(request.args.get("provider"))
     try:
-        return jsonify(get_translation_provider().get_languages())
+        return jsonify(
+            get_translation_provider(provider_name=provider_name).get_languages()
+        )
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 503
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @api_bp.get("/translation/settings")
 def translation_settings():
+    provider = default_project_translation_provider()
     return jsonify({
-        "provider": current_app.config.get("TRANSLATION_DEFAULT_PROVIDER", "hy-mt2"),
+        "provider": provider,
+        "providers": translation_provider_options(),
         "model": current_app.config.get("HY_MT_MODEL", "Hy-MT2-7B"),
         **_translation_setting_defaults(),
     })
@@ -83,13 +101,16 @@ def diagnostics():
 
 @api_bp.get("/projects/<project_id>")
 def get_project(project_id):
-    return jsonify(_project_or_404(project_id).to_dict(language_names=_translation_language_names()))
+    project = _project_or_404(project_id)
+    names = _translation_language_names(project.translation_provider)
+    return jsonify(project.to_dict(language_names=names))
 
 
 @api_bp.patch("/projects/<project_id>")
 def update_project(project_id):
     project = _project_or_404(project_id)
     payload = request.get_json(silent=True) or {}
+    translation_selection = _parse_project_translation_selection(project, payload)
     if "glossary" in payload:
         project.glossary = str(payload.get("glossary") or "").strip() or None
     if "detect_speakers" in payload:
@@ -98,13 +119,27 @@ def update_project(project_id):
         project.smooth_speaker_fragments = _parse_bool_value(
             payload["smooth_speaker_fragments"]
         )
+    if translation_selection:
+        provider_name, target_language = translation_selection
+        selection_changed = (
+            provider_name != project.translation_provider
+            or target_language != project.target_language
+        )
+        project.translation_provider = provider_name
+        project.target_language = target_language
+        if selection_changed:
+            project.translation_needs_reprocessing = (
+                bool(project.translation_needs_reprocessing) or bool(project.segments)
+            )
+            _invalidate_project_outputs(project)
     if "translation_settings" in payload:
         settings = payload.get("translation_settings")
         if not isinstance(settings, dict):
             abort(400, description="translation_settings must be an object")
         _apply_translation_settings(project, settings)
     db.session.commit()
-    return jsonify(project.to_dict(language_names=_translation_language_names()))
+    names = _translation_language_names(project.translation_provider)
+    return jsonify(project.to_dict(language_names=names))
 
 
 @api_bp.delete("/projects/<project_id>")
@@ -207,6 +242,8 @@ def update_segment(segment_id):
 @api_bp.post("/projects/<project_id>/export/srt")
 def export_srt(project_id):
     project = _project_or_404(project_id)
+    if project.translation_needs_reprocessing:
+        return jsonify({"error": "Reprocess the project before exporting updated subtitles"}), 400
     try:
         srt_path = generate_srt(project.id)
     except ValueError as exc:
@@ -228,6 +265,8 @@ def render_project(project_id):
         return jsonify({"error": "Upload a video before rendering"}), 400
     if not project.segments:
         return jsonify({"error": "Process the video before rendering"}), 400
+    if project.translation_needs_reprocessing:
+        return jsonify({"error": "Reprocess the project before rendering updated subtitles"}), 400
     try:
         require_job_preflight("render", project)
     except PreflightError as exc:
@@ -336,6 +375,104 @@ def _apply_translation_settings(project, values, defaults=None):
         setattr(project, attribute, parsed)
 
 
+def _parse_translation_provider(value):
+    if value in (None, ""):
+        return default_project_translation_provider()
+    provider = normalize_project_translation_provider(value)
+    if not provider:
+        valid = ", ".join(provider["id"] for provider in translation_provider_options())
+        abort(400, description=f"translation_provider must be one of: {valid}")
+    return provider
+
+
+def _parse_project_translation_selection(project, payload):
+    if "translation_provider" not in payload and "target_language" not in payload:
+        return None
+    if project.status in {ProjectStatus.PROCESSING, ProjectStatus.RENDERING}:
+        abort(
+            400,
+            description=(
+                "Cannot update translation engine or target language while a job is active"
+            ),
+        )
+
+    provider_name = (
+        _parse_translation_provider(payload.get("translation_provider"))
+        if "translation_provider" in payload
+        else _parse_translation_provider(project.translation_provider)
+    )
+    raw_target = (
+        payload.get("target_language")
+        if "target_language" in payload
+        else project.target_language
+    )
+    target_language = normalize_translation_language(raw_target)
+    if not target_language or target_language == "auto":
+        abort(400, description="target_language must be a supported language code")
+
+    _validate_project_translation_languages(
+        provider_name,
+        project.source_language,
+        target_language,
+    )
+    return provider_name, target_language
+
+
+def _validate_project_translation_languages(
+    provider_name, source_language, target_language,
+):
+    try:
+        languages = get_translation_provider(
+            provider_name=provider_name
+        ).get_languages()
+    except RuntimeError as exc:
+        abort(503, description=str(exc))
+    except ValueError as exc:
+        abort(400, description=str(exc))
+
+    catalog = {}
+    for language in languages:
+        if not isinstance(language, dict):
+            continue
+        code = normalize_translation_language(language.get("code"))
+        if code:
+            catalog[code] = language
+
+    if target_language not in catalog:
+        abort(
+            400,
+            description=(
+                f"{provider_name} does not support target language {target_language}"
+            ),
+        )
+
+    source_code = normalize_translation_language(source_language)
+    if not source_code:
+        abort(400, description="Project source language is invalid")
+    if source_code == "auto":
+        return
+    source = catalog.get(source_code)
+    if not source:
+        abort(
+            400,
+            description=f"{provider_name} does not support source language {source_code}",
+        )
+    if isinstance(source.get("targets"), list):
+        targets = {
+            code
+            for value in source["targets"]
+            if (code := normalize_translation_language(value))
+        }
+        if target_language not in targets:
+            abort(
+                400,
+                description=(
+                    f"{provider_name} does not support translation from "
+                    f"{source_code} to {target_language}"
+                ),
+            )
+
+
 def _translation_setting_defaults():
     return {
         "temperature": current_app.config.get("HY_MT_TEMPERATURE", 0.7),
@@ -364,9 +501,9 @@ def _send_existing_file(path, as_attachment=False):
     return send_file(path, as_attachment=as_attachment)
 
 
-def _translation_language_names():
+def _translation_language_names(provider_name=None):
     try:
-        languages = get_translation_provider().get_languages()
+        languages = get_translation_provider(provider_name=provider_name).get_languages()
     except (RuntimeError, ValueError):
         return {}
     return {

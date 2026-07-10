@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from app import routes
 from app import create_app
 from app.extensions import db
 from app.models import Project, ProjectStatus, SubtitleSegment
@@ -94,6 +95,30 @@ def test_project_serializer_includes_translation_progress(app):
         assert payload["translation_progress"] == {"completed": 12, "total": 30}
 
 
+def test_project_serializer_includes_selected_translation_provider(app):
+    with app.app_context():
+        project = Project(
+            title="Demo",
+            source_language="en",
+            target_language="es",
+            translation_provider="nllb-ct2",
+        )
+
+        assert project.to_dict()["translation_provider"] == "nllb-ct2"
+
+
+def test_project_serializer_includes_translation_reprocessing_state(app):
+    with app.app_context():
+        project = Project(
+            title="Demo",
+            source_language="en",
+            target_language="es",
+            translation_needs_reprocessing=True,
+        )
+
+        assert project.to_dict()["translation_needs_reprocessing"] is True
+
+
 def test_create_project_accepts_optional_speaker_hints(client):
     response = client.post(
         "/api/projects",
@@ -119,6 +144,127 @@ def test_create_project_accepts_glossary(client):
 
     assert response.status_code == 201
     assert response.json["glossary"] == "Alonzo\nSubtitleD"
+
+
+def test_create_project_accepts_and_updates_translation_provider(client):
+    created = client.post("/api/projects", json={
+        "title": "Provider",
+        "source_language": "en",
+        "target_language": "es",
+        "translation_provider": "libre-translate",
+    })
+
+    assert created.status_code == 201
+    assert created.json["translation_provider"] == "libretranslate"
+
+    updated = client.patch(f"/api/projects/{created.json['id']}", json={
+        "translation_provider": "nllb",
+    })
+
+    assert updated.status_code == 200
+    assert updated.json["translation_provider"] == "nllb-ct2"
+
+
+def test_project_updates_engine_and_target_atomically_and_invalidates_outputs(
+    client, app,
+):
+    with app.app_context():
+        storage_dir = Path(app.config["STORAGE_DIR"])
+        srt_path = storage_dir / "exports" / "old.srt"
+        output_path = storage_dir / "renders" / "old.mp4"
+        srt_path.write_text("old subtitles", encoding="utf-8")
+        output_path.write_bytes(b"old render")
+        project = Project(
+            title="Retarget",
+            source_language="en",
+            target_language="es",
+            translation_provider="hy-mt2-kobold",
+            status=ProjectStatus.RENDERED,
+            srt_path=str(srt_path),
+            output_video_path=str(output_path),
+        )
+        db.session.add(project)
+        db.session.flush()
+        db.session.add(SubtitleSegment(
+            project_id=project.id,
+            start_time=0,
+            end_time=1,
+            original_text="Hello",
+            translated_text="Hola",
+            segment_index=0,
+        ))
+        db.session.commit()
+        project_id = project.id
+
+    response = client.patch(f"/api/projects/{project_id}", json={
+        "translation_provider": "nllb",
+        "target_language": "fr",
+    })
+
+    assert response.status_code == 200
+    assert response.json["translation_provider"] == "nllb-ct2"
+    assert response.json["target_language"] == "fr"
+    assert response.json["target_language_name"] == "French"
+    assert response.json["translation_needs_reprocessing"] is True
+    assert response.json["status"] == ProjectStatus.PROCESSED
+    assert response.json["srt_path"] is None
+    assert response.json["output_video_path"] is None
+    assert not srt_path.exists()
+    assert not output_path.exists()
+
+    export = client.post(f"/api/projects/{project_id}/export/srt")
+    assert export.status_code == 400
+    assert "Reprocess" in export.json["error"]
+
+
+def test_project_rejects_unsupported_target_pair(client):
+    created = client.post("/api/projects", json={
+        "title": "Same language",
+        "source_language": "en",
+        "target_language": "es",
+        "translation_provider": "nllb",
+    })
+
+    response = client.patch(f"/api/projects/{created.json['id']}", json={
+        "target_language": "en",
+    })
+
+    assert response.status_code == 400
+    assert "does not support translation from en to en" in response.json["error"]
+
+
+@pytest.mark.parametrize("status", [ProjectStatus.PROCESSING, ProjectStatus.RENDERING])
+def test_project_rejects_target_change_while_job_is_active(client, app, status):
+    with app.app_context():
+        project = Project(
+            title="Busy",
+            source_language="en",
+            target_language="es",
+            translation_provider="nllb-ct2",
+            status=status,
+        )
+        db.session.add(project)
+        db.session.commit()
+        project_id = project.id
+
+    response = client.patch(f"/api/projects/{project_id}", json={
+        "target_language": "fr",
+    })
+
+    assert response.status_code == 400
+    assert "while a job is active" in response.json["error"]
+
+
+def test_create_project_rejects_invalid_translation_provider(client):
+    response = client.post("/api/projects", json={
+        "title": "Invalid",
+        "source_language": "en",
+        "target_language": "es",
+        "translation_provider": "other",
+    })
+
+    assert response.status_code == 400
+    assert "translation_provider" in response.json["error"]
 
 
 def test_project_accepts_and_updates_hy_mt_translation_settings(client):
@@ -156,9 +302,35 @@ def test_translation_settings_endpoint_exposes_server_defaults(client):
     response = client.get("/api/translation/settings")
 
     assert response.status_code == 200
+    assert response.json["provider"] == "hy-mt2-kobold"
+    assert [provider["id"] for provider in response.json["providers"]] == [
+        "hy-mt2-kobold",
+        "nllb-ct2",
+        "libretranslate",
+    ]
     assert response.json["model"] == "Hy-MT2-7B"
     assert response.json["temperature"] == .7
     assert response.json["context_captions"] == 2
+
+
+def test_languages_endpoint_uses_requested_translation_provider(client, monkeypatch):
+    calls = []
+
+    class Provider:
+        def get_languages(self):
+            return [{"code": "zz", "name": "Zed", "targets": ["en"]}]
+
+    def fake_get_translation_provider(settings=None, provider_name=None):
+        calls.append(provider_name)
+        return Provider()
+
+    monkeypatch.setattr(routes, "get_translation_provider", fake_get_translation_provider)
+
+    response = client.get("/api/languages?provider=nllb")
+
+    assert response.status_code == 200
+    assert response.json == [{"code": "zz", "name": "Zed", "targets": ["en"]}]
+    assert calls == ["nllb-ct2"]
 
 
 def test_create_project_defaults_expensive_features_off_and_accepts_opt_in(client):
