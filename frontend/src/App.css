@@ -1,34 +1,93 @@
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  height: 58px;
+.app-shell { min-height: 100vh; }
+
+.app-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 20;
+  width: 224px;
   display: flex;
-  align-items: center;
-  padding: 0 28px;
-  background: rgba(255, 255, 255, 0.92);
-  border-bottom: 1px solid #dce4e1;
-  backdrop-filter: blur(10px);
+  flex-direction: column;
+  padding: 24px 14px 18px;
+  color: #dfe4e2;
+  background: #111514;
+  border-right: 1px solid #272c2a;
 }
 
 .brand {
-  color: #102c35;
-  font-weight: 800;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  color: inherit;
   text-decoration: none;
 }
 
-.page-shell {
-  width: min(1180px, calc(100% - 32px));
-  margin: 28px auto 48px;
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  color: #f3f6f4;
+  font-size: 17px;
+  font-weight: 720;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  white-space: nowrap;
 }
 
-@media (max-width: 860px) {
-  .topbar {
-    padding: 0 16px;
-  }
+.logo-frame {
+  width: 28px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  font-size: 18px;
+  font-weight: 780;
+  background-image:
+    linear-gradient(currentColor,currentColor), linear-gradient(currentColor,currentColor),
+    linear-gradient(currentColor,currentColor), linear-gradient(currentColor,currentColor),
+    linear-gradient(currentColor,currentColor), linear-gradient(currentColor,currentColor),
+    linear-gradient(currentColor,currentColor), linear-gradient(currentColor,currentColor);
+  background-position:
+    left top, left top, right top, right top,
+    left bottom, left bottom, right bottom, right bottom;
+  background-size:
+    8px 2px, 2px 8px, 8px 2px, 2px 8px,
+    8px 2px, 2px 8px, 8px 2px, 2px 8px;
+  background-repeat: no-repeat;
+}
 
-  .page-shell {
-    width: min(100% - 20px, 1180px);
-    margin-top: 18px;
-  }
+.logo-frame-dark { color: #f3f6f4; }
+.logo-frame-mint { color: #4ddd9d; }
+.logo-frame > span { color: #f3f6f4; }
+.logo-middle { margin: 0 7px; color: #f3f6f4; }
+.brand-logo.is-compact { gap: 3px; }
+.brand-logo.is-compact .logo-middle { display: none; }
+.brand-logo.is-compact .logo-frame { width: 27px; height: 29px; }
+
+.app-nav { display: grid; gap: 5px; margin-top: 32px; }
+.app-nav a {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 42px;
+  padding: 0 11px;
+  color: #aeb8b4;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+}
+.app-nav a:hover, .app-nav a.active { color: #fff; background: #252a28; }
+.nav-icon { width: 18px; color: #83908b; font-size: 17px; text-align: center; }
+.sidebar-status { margin-top: auto; display: flex; align-items: center; gap: 9px; padding: 0 10px; color: #84908b; font-size: 12px; }
+.status-dot { width: 7px; height: 7px; background: #4ddd9d; border-radius: 50%; box-shadow: 0 0 0 4px rgba(77,221,157,.08); }
+
+.app-content { min-height: 100vh; margin-left: 224px; }
+.mobile-topbar { display: none; }
+.page-shell { width: min(1240px, calc(100% - 56px)); margin: 0 auto; padding: 44px 0 64px; }
+.compact-action { color: inherit; font-size: 13px; font-weight: 700; text-decoration: none; }
+
+@media (max-width: 760px) {
+  .app-sidebar { display: none; }
+  .app-content { margin-left: 0; }
+  .mobile-topbar { height: 60px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; color: #eef2f0; background: #111514; }
+  .page-shell { width: min(100% - 28px, 1240px); padding: 26px 0 46px; }
 }

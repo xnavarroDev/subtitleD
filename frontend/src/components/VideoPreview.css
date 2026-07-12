@@ -2,6 +2,12 @@
   width: 100%;
   aspect-ratio: 16 / 9;
   display: block;
-  border-radius: 8px;
-  background: #0f171a;
+  border-radius: 9px;
+  background: #0f1312;
 }
+
+.video-panel { padding: 16px; background: #171c1a; border-color: #252c29; }
+.video-panel .section-heading { align-items: center; margin: 0 2px 14px; }
+.video-panel h2 { color: #f4f6f5; }
+.video-panel .eyebrow { color: #7e8b85; }
+.video-mode { padding: 4px 8px; color: #a9b4af; background: #252c29; border-radius: 999px; font-size: 10px; font-weight: 700; }

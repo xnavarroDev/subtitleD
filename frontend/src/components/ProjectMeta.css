@@ -1,49 +1,18 @@
-.meta-panel dl {
-  display: grid;
-  gap: 12px;
-  margin: 0;
-}
-
-.meta-panel div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid #edf2f0;
-  padding-bottom: 10px;
-}
-
-.meta-panel dt {
-  color: #60736d;
-  font-weight: 800;
-}
-
-.meta-panel dd {
-  margin: 0;
-  color: #172026;
-  text-align: right;
-}
-
-.project-option-list {
-  display: grid;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.project-translation-form {
-  display: grid;
-  gap: 8px;
-}
-
-.project-translation-form > div,
-.project-translation-form label {
-  display: grid;
-  gap: 4px;
-}
-
-.project-translation-form > div {
-  align-items: initial;
-  justify-content: initial;
-  border-bottom: 0;
-  padding-bottom: 0;
-}
+.meta-panel { padding: 18px; }
+.meta-panel .section-heading { margin-bottom: 14px; }
+.project-details { margin-bottom: 16px; padding: 11px 12px; background: #f7f8f7; border: 1px solid #e4e7e5; border-radius: 8px; }
+.project-details summary { cursor: pointer; color: #4c5853; font-size: 13px; font-weight: 700; }
+.meta-panel dl { display: grid; gap: 8px; margin: 12px 0 0; }
+.meta-panel dl div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid #e7eae8; font-size: 11px; }
+.meta-panel dl div:last-child { padding-bottom: 0; border-bottom: 0; }
+.meta-panel dt { color: #78827e; font-weight: 650; }
+.meta-panel dd { margin: 0; color: #2a332f; text-align: right; }
+.project-option-list { display: grid; gap: 10px; }
+.project-translation-form { display: grid; gap: 8px; }
+.project-translation-form > div { display: grid; gap: 3px; margin-bottom: 5px; }
+.project-translation-form label { margin-bottom: 4px; }
+.project-translation-form small { font-size: 11px; font-weight: 500; }
+.meta-panel .checkbox-option { margin-bottom: 4px; }
+.meta-panel .checkbox-option small { font-size: 10px; font-weight: 500; }
+.meta-panel .advanced-settings { margin-top: 14px; }
+.meta-panel .advanced-settings form { margin-top: 14px; }

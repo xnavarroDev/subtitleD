@@ -10,9 +10,10 @@ export default function VideoPreview({ project }) {
     <section className="panel video-panel">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Preview</p>
-          <h2>{renderedUrl ? "Rendered Video" : "Source Video"}</h2>
+          <p className="eyebrow">Video</p>
+          <h2>{renderedUrl ? "Rendered preview" : "Source preview"}</h2>
         </div>
+        <span className="video-mode">{renderedUrl ? "With subtitles" : "Original"}</span>
       </div>
       {videoUrl ? <video controls src={videoUrl} /> : <div className="empty-state">No video yet.</div>}
     </section>

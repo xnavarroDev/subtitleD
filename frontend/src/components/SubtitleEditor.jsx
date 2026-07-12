@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { listSegments, updateSegment } from "../api";
 import "./SubtitleEditor.css";
@@ -6,6 +6,7 @@ import "./SubtitleEditor.css";
 export default function SubtitleEditor({ projectId, enabled }) {
   const [segments, setSegments] = useState([]);
   const [drafts, setDrafts] = useState({});
+  const [selectedId, setSelectedId] = useState(null);
   const [saving, setSaving] = useState(null);
   const [error, setError] = useState(null);
 
@@ -18,14 +19,19 @@ export default function SubtitleEditor({ projectId, enabled }) {
       speaker_label: segment.speaker_label ?? "",
       translated_text: segment.translated_text
     }])));
+    setSelectedId((current) => next.some((segment) => segment.id === current) ? current : next[0]?.id ?? null);
   }, [projectId]);
 
   useEffect(() => {
     if (enabled) loadSegments().catch(() => undefined);
   }, [enabled, loadSegments]);
 
+  const selectedSegment = useMemo(
+    () => segments.find((segment) => segment.id === selectedId) ?? null,
+    [segments, selectedId]
+  );
+  const selectedDraft = selectedSegment ? drafts[selectedSegment.id] : null;
   const showSpeakers = segments.some((segment) => Boolean(segment.speaker_label));
-  const showConfidence = segments.some((segment) => segment.transcription_confidence != null);
 
   function updateDraft(segmentId, patch) {
     setDrafts((current) => ({ ...current, [segmentId]: { ...current[segmentId], ...patch } }));
@@ -52,37 +58,81 @@ export default function SubtitleEditor({ projectId, enabled }) {
     }
   }
 
+  function selectNeighbor(offset) {
+    const index = segments.findIndex((segment) => segment.id === selectedId);
+    const next = segments[index + offset];
+    if (next) setSelectedId(next.id);
+  }
+
   return (
     <section className="panel editor-panel">
-      <div className="section-heading">
-        <div><p className="eyebrow">Subtitles</p><h2>Transcript and Translation</h2></div>
-        <button onClick={loadSegments} disabled={!enabled}>Refresh</button>
+      <div className="section-heading editor-heading">
+        <div><p className="eyebrow">Subtitles</p><h2>Transcript and translation</h2></div>
+        <div className="editor-heading-actions"><span>{segments.length} captions</span><button className="ghost-button" onClick={loadSegments} disabled={!enabled}>Refresh</button></div>
       </div>
-      <p className="editor-help">The transcript preserves WhisperX output. Deterministic rules choose timing, while the configured local model translates complete source units with optional neighboring context.</p>
       {error ? <div className="notice error">{error}</div> : null}
-      {!enabled ? <div className="empty-state">Process the video to create subtitle segments.</div> : !segments.length ? <div className="empty-state">No segments found.</div> : (
-        <div className="table-wrap"><table>
-          <thead><tr><th>Start</th><th>End</th>{showSpeakers ? <th>Speaker</th> : null}{showConfidence ? <th>Confidence</th> : null}<th>WhisperX transcript</th><th>Final translation</th><th>Save</th></tr></thead>
-          <tbody>{segments.map((segment) => {
-            const draft = drafts[segment.id];
-            return <tr key={segment.id}>
-              <td><input className="time-input" value={draft?.start_time ?? ""} onChange={(event) => updateDraft(segment.id, { start_time: event.target.value })} /></td>
-              <td><input className="time-input" value={draft?.end_time ?? ""} onChange={(event) => updateDraft(segment.id, { end_time: event.target.value })} /></td>
-              {showSpeakers ? <td><input className="speaker-input" value={draft?.speaker_label ?? ""} onChange={(event) => updateDraft(segment.id, { speaker_label: event.target.value })} /></td> : null}
-              {showConfidence ? <td><span className={`confidence ${confidenceClass(segment.transcription_confidence)}`}>{formatConfidence(segment.transcription_confidence)}</span>{segment.timing_quality === "estimated" ? <small className="timing-estimated">Estimated timing</small> : null}</td> : null}
-              <td className="original-text">{segment.original_text}{segment.source_was_reconstructed ? <small className="source-reconstructed">Source fragments reconstructed for translation</small> : null}{segment.translation_confidence_warning ? <small className="source-confidence-warning">{segment.translation_confidence_warning}</small> : null}</td>
-              <td><textarea value={draft?.translated_text ?? ""} onChange={(event) => updateDraft(segment.id, { translated_text: event.target.value })} /><small className="translation-method">{providerLabel(segment)} · {methodLabel(segment.translation_method)}</small></td>
-              <td><button disabled={saving === segment.id} onClick={() => save(segment.id)}>{saving === segment.id ? "Saving..." : "Save"}</button></td>
-            </tr>;
-          })}</tbody>
-        </table></div>
+      {!enabled ? <div className="empty-state"><strong>No captions yet</strong><span>Process the video to generate a transcript and translation.</span></div> : !segments.length ? <div className="empty-state">No segments found.</div> : (
+        <div className="caption-editor">
+          <div className="caption-list" aria-label="Subtitle captions">
+            {segments.map((segment, index) => {
+              const active = segment.id === selectedId;
+              const draft = drafts[segment.id];
+              return (
+                <button className={`caption-row ${active ? "active" : ""}`} key={segment.id} type="button" onClick={() => setSelectedId(segment.id)} aria-pressed={active}>
+                  <span className="caption-index">{String(index + 1).padStart(2, "0")}</span>
+                  <span className="caption-copy">
+                    <span className="caption-source">{segment.original_text}</span>
+                    <span className="caption-translation">{draft?.translated_text || "No translation"}</span>
+                  </span>
+                  <span className="caption-time">{formatTime(segment.start_time)}</span>
+                  {segment.translation_confidence_warning ? <span className="caption-warning" aria-label="Needs review">!</span> : null}
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedSegment && selectedDraft ? (
+            <div className="caption-inspector">
+              <div className="inspector-header">
+                <div><p className="eyebrow">Caption {segments.findIndex((segment) => segment.id === selectedId) + 1}</p><h3>Edit caption</h3></div>
+                {selectedSegment.transcription_confidence != null ? <span className={`confidence ${confidenceClass(selectedSegment.transcription_confidence)}`}>{formatConfidence(selectedSegment.transcription_confidence)} confidence</span> : null}
+              </div>
+
+              <div className="timing-fields">
+                <label><span>Start</span><input value={selectedDraft.start_time} onChange={(event) => updateDraft(selectedId, { start_time: event.target.value })} /></label>
+                <label><span>End</span><input value={selectedDraft.end_time} onChange={(event) => updateDraft(selectedId, { end_time: event.target.value })} /></label>
+                {showSpeakers ? <label><span>Speaker</span><input value={selectedDraft.speaker_label} onChange={(event) => updateDraft(selectedId, { speaker_label: event.target.value })} /></label> : null}
+              </div>
+
+              <label className="source-field"><span>Original transcript</span><div>{selectedSegment.original_text}</div></label>
+              <label><span>Final translation</span><textarea value={selectedDraft.translated_text} onChange={(event) => updateDraft(selectedId, { translated_text: event.target.value })} /></label>
+
+              <div className="caption-provenance">
+                <span>{providerLabel(selectedSegment)}</span><span>{methodLabel(selectedSegment.translation_method)}</span>
+                {selectedSegment.timing_quality === "estimated" ? <span className="warning-text">Estimated timing</span> : null}
+              </div>
+
+              <div className="inspector-actions">
+                <div><button className="ghost-button" type="button" onClick={() => selectNeighbor(-1)} disabled={segments[0]?.id === selectedId}>&larr; Previous</button><button className="ghost-button" type="button" onClick={() => selectNeighbor(1)} disabled={segments.at(-1)?.id === selectedId}>Next &rarr;</button></div>
+                <button className="primary-action" disabled={saving === selectedId} onClick={() => save(selectedId)}>{saving === selectedId ? "Saving..." : "Save changes"}</button>
+              </div>
+            </div>
+          ) : null}
+        </div>
       )}
     </section>
   );
 }
 
+function formatTime(value) {
+  const seconds = Math.max(0, Number(value) || 0);
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.floor(seconds % 60);
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
 function formatConfidence(value) {
-  return value == null ? "—" : `${Math.round(value * 100)}%`;
+  return value == null ? "--" : `${Math.round(value * 100)}%`;
 }
 
 function confidenceClass(value) {
@@ -95,13 +145,13 @@ function confidenceClass(value) {
 function methodLabel(value) {
   const labels = {
     contextual_timing: "Legacy AI timing",
-    contextual_timing_unit: "Legacy AI timing · semantic unit",
-    contextual_timing_resized: "Legacy AI timing · resized",
+    contextual_timing_unit: "Legacy AI timing / semantic unit",
+    contextual_timing_resized: "Legacy AI timing / resized",
     deterministic_timing: "Deterministic timing",
-    deterministic_timing_unit: "Deterministic timing · semantic unit",
-    deterministic_timing_resized: "Deterministic timing · resized",
+    deterministic_timing_unit: "Deterministic timing / semantic unit",
+    deterministic_timing_resized: "Deterministic timing / resized",
     contextual: "Legacy contextual LLM",
-    contextual_split: "Legacy contextual LLM · split",
+    contextual_split: "Legacy contextual LLM / split",
     fallback: "Legacy deterministic fallback"
   };
   return labels[value] || value || "Translation";

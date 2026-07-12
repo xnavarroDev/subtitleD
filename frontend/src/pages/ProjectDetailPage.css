@@ -1,19 +1,30 @@
-.detail-header p {
-  margin: 6px 0 0;
-  color: #637670;
-}
-
-.back-link {
-  display: inline-block;
-  color: #126b61;
-  font-weight: 800;
-  margin-bottom: 8px;
-  text-decoration: none;
-}
-
-.actions-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 20px;
+.studio-page { display: grid; gap: 20px; }
+.studio-header { align-items: flex-end; margin: 0; }
+.project-title-line { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.studio-header h1 { font-size: clamp(28px,3.5vw,38px); }
+.studio-header p { margin: 7px 0 0; color: #747e7a; }
+.back-link { display: inline-block; margin-bottom: 9px; color: #65716c; font-size: 13px; font-weight: 700; text-decoration: none; }
+.back-link:hover { color: #1e6e4e; }
+.header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.processing-banner { display: grid; grid-template-columns:auto 1fr minmax(120px,280px); align-items: center; gap: 12px; padding: 12px 14px; color: #274337; background: #ebfaf3; border: 1px solid #bfe9d5; border-radius: 10px; }
+.processing-banner > div:not(.progress-track) { display: grid; }
+.processing-banner small { margin-top: 2px; }
+.processing-spinner { width: 18px; height: 18px; border: 2px solid #9dd9bd; border-top-color: #267950; border-radius: 50%; animation: studio-spin .8s linear infinite; }
+@keyframes studio-spin { to { transform: rotate(360deg); } }
+.progress-track { height: 6px; overflow: hidden; background: #d0eee0; border-radius: 999px; }
+.progress-track span { display: block; height: 100%; background: #35a975; border-radius: inherit; transition: width 240ms ease; }
+.studio-layout { display: grid; grid-template-columns:minmax(0,1fr) 310px; gap: 18px; align-items: start; }
+.studio-main, .studio-sidebar { min-width: 0; display: grid; gap: 18px; }
+.workflow-panel { display: grid; gap: 9px; }
+.workflow-panel > div { margin-bottom: 5px; }
+.workflow-panel button { justify-content: flex-start; width: 100%; }
+.action-number { width: 22px; height: 22px; display: grid; place-items: center; color: #53615b; background: #eef1ef; border-radius: 50%; font-size: 11px; }
+.workflow-panel .primary-action .action-number { color: #173c2d; background: rgba(255,255,255,.5); }
+@media (max-width: 1050px) { .studio-layout { grid-template-columns: 1fr; } .studio-sidebar { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width: 700px) {
+  .studio-header { align-items: flex-start; flex-direction: column; }
+  .header-actions { justify-content: flex-start; }
+  .processing-banner { grid-template-columns:auto 1fr; }
+  .progress-track { grid-column:1/-1; }
+  .studio-sidebar { grid-template-columns:1fr; }
 }
