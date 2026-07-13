@@ -146,11 +146,13 @@ export default function ProjectMeta({ project, onProjectChange }) {
     <section className="panel meta-panel">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Metadata</p>
-          <h2>Project State</h2>
+          <p className="eyebrow">Configuration</p>
+          <h2>Project settings</h2>
         </div>
       </div>
-      <dl>
+      <details className="project-details">
+        <summary>Project details</summary>
+        <dl>
         <div>
           <dt>Created</dt>
           <dd>{new Date(project.created_at).toLocaleString()}</dd>
@@ -175,7 +177,8 @@ export default function ProjectMeta({ project, onProjectChange }) {
         <div><dt>Speaker smoothing</dt><dd>{project.smooth_speaker_fragments ? "Enabled" : "Disabled"}</dd></div>
         <div><dt>Glossary terms</dt><dd>{project.glossary ? project.glossary.split(/[,\n]/).filter(Boolean).length : 0}</dd></div>
         <div><dt>Translation context</dt><dd>{project.translation_settings?.context_captions ?? 0} neighboring unit(s)</dd></div>
-      </dl>
+        </dl>
+      </details>
       <div className="project-option-list">
         <form className="project-translation-form" onSubmit={saveTranslationSelection}>
           <div>

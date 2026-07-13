@@ -66,50 +66,53 @@ export default function ProjectDetailPage() {
   const srtUrl = absoluteFileUrl(project.srt_download_url);
 
   return (
-    <main className="page-shell">
-      <section className="detail-header">
+    <main className="page-shell studio-page">
+      <section className="detail-header studio-header">
         <div>
-          <Link className="back-link" to="/">Back to projects</Link>
-          <h1>{project.title}</h1>
-          <p>{project.source_language_name || project.source_language} to {project.target_language_name || project.target_language}</p>
+          <Link className="back-link" to="/">&lsaquo; Projects</Link>
+          <div className="project-title-line"><h1>{project.title}</h1><StatusPill status={project.status} /></div>
+          <p>{project.source_language_name || project.source_language} <span aria-hidden="true">&rarr;</span> {project.target_language_name || project.target_language}</p>
         </div>
-        <StatusPill status={project.status} />
+        <div className="header-actions">
+          {srtUrl ? <a className="button-link" href={srtUrl}>Download SRT</a> : null}
+          {downloadUrl ? <a className="button-link primary" href={downloadUrl}>Download MP4</a> : null}
+          {!downloadUrl ? <button className="primary-action" onClick={() => runAction("Render video", () => renderProject(project.id))} disabled={!canPublishSegments || isActiveJob(project) || busyAction !== null}>{busyAction === "Render video" ? "Starting..." : "Export video"}</button> : null}
+        </div>
       </section>
 
       {error ? <div className="notice error">{error}</div> : null}
       {project.error_message ? <div className="notice error">{project.error_message}</div> : null}
       {project.processing_warning ? <div className="notice warning">{project.processing_warning}</div> : null}
-      {project.translation_needs_reprocessing ? (
-        <div className="notice warning">
-          The translation engine or target language changed. Reprocess the video before exporting or rendering.
-        </div>
-      ) : null}
+      {project.translation_needs_reprocessing ? <div className="notice warning">The translation engine or target language changed. Reprocess the video before exporting or rendering.</div> : null}
       {isActiveJob(project) ? (
-        <div className="notice progress-notice">
-          {stageLabel(project.processing_stage)}
-          {progress.total ? ` — ${progress.completed} of ${progress.total} words` : ""}
+        <div className="processing-banner">
+          <span className="processing-spinner" />
+          <div><strong>{stageLabel(project.processing_stage)}</strong><small>{progress.total ? `${progress.completed} of ${progress.total} words` : "This can take a few minutes."}</small></div>
+          {progress.total ? <div className="progress-track"><span style={{ width: `${Math.min(100, (progress.completed / progress.total) * 100)}%` }} /></div> : null}
         </div>
       ) : null}
 
-      <section className="actions-bar">
-        <button onClick={() => runAction("Process video", () => processProject(project.id))} disabled={!project.source_video_url || isActiveJob(project) || busyAction !== null}>
-          {busyAction === "Process video" ? "Starting..." : "Process Video"}
-        </button>
-        <button onClick={() => runAction("Export SRT", () => exportProjectSrt(project.id))} disabled={!canPublishSegments || isActiveJob(project) || busyAction !== null}>
-          {busyAction === "Export SRT" ? "Exporting..." : "Export SRT"}
-        </button>
-        <button onClick={() => runAction("Render video", () => renderProject(project.id))} disabled={!canPublishSegments || isActiveJob(project) || busyAction !== null}>
-          {busyAction === "Render video" ? "Starting..." : "Render Subtitled Video"}
-        </button>
-        {srtUrl ? <a className="button-link" href={srtUrl}>Download SRT</a> : null}
-        {downloadUrl ? <a className="button-link primary" href={downloadUrl}>Download MP4</a> : null}
+      <section className="studio-layout">
+        <div className="studio-main">
+          <VideoPreview project={project} />
+          <SubtitleEditor projectId={project.id} enabled={hasSegments} />
+        </div>
+        <aside className="studio-sidebar">
+          <section className="panel workflow-panel">
+            <div><p className="eyebrow">Workflow</p><h2>Project actions</h2></div>
+            <button className={!hasSegments ? "primary-action" : ""} onClick={() => runAction("Process video", () => processProject(project.id))} disabled={!project.source_video_url || isActiveJob(project) || busyAction !== null}>
+              <span className="action-number">1</span>{busyAction === "Process video" ? "Starting..." : hasSegments ? "Reprocess video" : "Process video"}
+            </button>
+            <button onClick={() => runAction("Export SRT", () => exportProjectSrt(project.id))} disabled={!canPublishSegments || isActiveJob(project) || busyAction !== null}>
+              <span className="action-number">2</span>{busyAction === "Export SRT" ? "Exporting..." : "Create SRT"}
+            </button>
+            <button onClick={() => runAction("Render video", () => renderProject(project.id))} disabled={!canPublishSegments || isActiveJob(project) || busyAction !== null}>
+              <span className="action-number">3</span>{busyAction === "Render video" ? "Starting..." : "Render subtitles"}
+            </button>
+          </section>
+          <ProjectMeta project={project} onProjectChange={loadProject} />
+        </aside>
       </section>
-
-      <section className="detail-grid">
-        <VideoPreview project={project} />
-        <ProjectMeta project={project} onProjectChange={loadProject} />
-      </section>
-      <SubtitleEditor projectId={project.id} enabled={hasSegments} />
     </main>
   );
 }
@@ -123,8 +126,8 @@ function stageLabel(stage) {
     queued: "Queued for processing",
     extracting_audio: "Extracting audio",
     transcribing: "Transcribing with WhisperX",
-    loading_japanese_alignment: "Loading and applying Japanese forced alignment",
-    segmenting_and_translating: "Selecting deterministic caption timing and translating"
+    loading_japanese_alignment: "Applying Japanese alignment",
+    segmenting_and_translating: "Creating and translating captions"
   };
   return labels[stage] || "Processing video";
 }
