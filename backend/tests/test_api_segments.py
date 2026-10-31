@@ -306,7 +306,6 @@ def test_translation_settings_endpoint_exposes_server_defaults(client):
     assert [provider["id"] for provider in response.json["providers"]] == [
         "hy-mt2-kobold",
         "nllb-ct2",
-        "libretranslate",
     ]
     assert response.json["model"] == "Hy-MT2-7B"
     assert response.json["temperature"] == .7

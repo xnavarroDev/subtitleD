@@ -139,7 +139,9 @@ class LocalNllbTranslationProvider:
         translator, tokenizer = self._runtime(source_code)
         sources = []
         for text in texts:
-            encoded = tokenizer.encode(str(text), truncation=True, max_length=self.max_input_tokens)
+            encoded = tokenizer.encode(str(text), truncation=False)
+            if len(encoded) > self.max_input_tokens:
+                raise ValueError("This passage is too long for the NLLB backup. Split it into a smaller passage before translating.")
             sources.append(tokenizer.convert_ids_to_tokens(encoded))
         results = []
         batch_size = max(self.batch_size, 1)

@@ -52,12 +52,22 @@ def test_get_translation_provider_can_use_explicit_project_provider(monkeypatch)
     assert isinstance(provider, LibreTranslateProvider)
 
 
-def test_get_translation_provider_can_select_local_nllb_with_fallback(monkeypatch):
-    from app.providers.local_translation import FallbackTranslationProvider
+def test_get_translation_provider_can_select_local_nllb_without_another_fallback(monkeypatch):
+    from app.providers.local_translation import LocalNllbTranslationProvider
 
     monkeypatch.setenv("TRANSLATION_PROVIDER", "nllb-ct2")
 
-    assert isinstance(get_translation_provider(), FallbackTranslationProvider)
+    assert isinstance(get_translation_provider(), LocalNllbTranslationProvider)
+
+
+def test_hy_mt_has_exactly_one_independent_backup():
+    from app.providers.local_translation import FallbackTranslationProvider, LocalNllbTranslationProvider
+    from app.providers.hy_mt import HyMtKoboldTranslationProvider
+    provider = get_translation_provider(provider_name="hy-mt2-kobold")
+    assert isinstance(provider, FallbackTranslationProvider)
+    assert isinstance(provider.primary, HyMtKoboldTranslationProvider)
+    assert isinstance(provider.fallback, LocalNllbTranslationProvider)
+    assert not isinstance(provider.fallback, FallbackTranslationProvider)
 
 
 @pytest.mark.parametrize(

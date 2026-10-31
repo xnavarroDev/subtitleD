@@ -111,6 +111,7 @@ def update_project(project_id):
     project = _project_or_404(project_id)
     payload = request.get_json(silent=True) or {}
     translation_selection = _parse_project_translation_selection(project, payload)
+    _require_idle(project)
     if "glossary" in payload:
         project.glossary = str(payload.get("glossary") or "").strip() or None
     if "detect_speakers" in payload:
@@ -145,6 +146,7 @@ def update_project(project_id):
 @api_bp.delete("/projects/<project_id>")
 def delete_project(project_id):
     project = _project_or_404(project_id)
+    _require_idle(project)
     paths = [project.source_video_path, project.extracted_audio_path, project.output_video_path, project.srt_path]
     db.session.delete(project)
     db.session.commit()
@@ -155,6 +157,7 @@ def delete_project(project_id):
 @api_bp.post("/projects/<project_id>/video")
 def upload_video(project_id):
     project = _project_or_404(project_id)
+    _require_idle(project)
     upload = request.files.get("video")
     if not upload or not upload.filename:
         return jsonify({"error": "Upload a video file with form field 'video'"}), 400
@@ -162,34 +165,68 @@ def upload_video(project_id):
         path = save_video_upload(upload, Path(current_app.config["STORAGE_DIR"]) / "uploads")
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    old_paths = [project.source_video_path, project.extracted_audio_path, project.srt_path, project.output_video_path]
+    SubtitleSegment.query.filter_by(project_id=project.id).delete(synchronize_session=False)
+    TranscriptWordRecord.query.filter_by(project_id=project.id).delete(synchronize_session=False)
     project.source_video_path = str(path)
+    project.extracted_audio_path = None
+    project.srt_path = None
+    project.output_video_path = None
+    project.detected_source_language = None
+    project.translation_needs_reprocessing = False
+    project.translation_completed_words = 0
+    project.translation_total_words = 0
     project.status = ProjectStatus.UPLOADED
     project.processing_stage = None
     project.processing_warning = None
     project.error_message = None
     db.session.commit()
+    _delete_project_artifacts(old_paths)
     return jsonify(project.to_dict())
 
 
 @api_bp.post("/projects/<project_id>/process")
 def process_project(project_id):
+    return _queue_processing(project_id, "process")
+
+
+@api_bp.post("/projects/<project_id>/transcribe")
+def transcribe_project(project_id):
+    return _queue_processing(project_id, "transcribe")
+
+
+@api_bp.post("/projects/<project_id>/translate")
+def translate_project(project_id):
+    return _queue_processing(project_id, "translate")
+
+
+def _queue_processing(project_id, mode):
     project = _project_or_404(project_id)
-    if not project.source_video_path:
+    _require_idle(project)
+    if mode != "translate" and not project.source_video_path:
         return jsonify({"error": "Upload a video before processing"}), 400
+    if mode == "translate" and not project.transcript_words:
+        return jsonify({"error": "Transcribe the video before translating"}), 400
     try:
-        require_job_preflight("process", project)
+        require_job_preflight(mode, project)
     except PreflightError as exc:
         return jsonify({"error": str(exc), "diagnostics": exc.report.to_dict(include_details=False)}), 503
-    from .tasks import process_video_task
+    from .tasks import process_video_task, translate_project_task
 
-    project.status = ProjectStatus.PROCESSING
-    project.processing_stage = "queued"
-    project.processing_warning = None
-    project.translation_completed_words = 0
-    project.translation_total_words = 0
-    project.error_message = None
-    db.session.commit()
-    task = process_video_task.delay(project.id)
+    _reserve_job(project, ProjectStatus.PROCESSING, f"queued_{mode}")
+    try:
+        if mode == "translate":
+            task = translate_project_task.delay(project.id)
+        elif mode == "transcribe":
+            task = process_video_task.delay(project.id, mode="transcribe")
+        else:
+            task = process_video_task.delay(project.id)
+    except Exception:
+        project.status = ProjectStatus.FAILED
+        project.processing_stage = "failed"
+        project.error_message = "Could not queue processing. Check the local worker and retry."
+        db.session.commit()
+        return jsonify({"error": project.error_message}), 503
     return jsonify({"task_id": task.id, "project": project.to_dict()}), 202
 
 
@@ -212,8 +249,23 @@ def update_segment(segment_id):
     segment = SubtitleSegment.query.get(segment_id)
     if not segment:
         abort(404, description="Subtitle segment not found")
+    _require_idle(segment.project)
     payload = request.get_json(silent=True) or {}
     changed = False
+    if payload.get("revision") and payload["revision"] != segment.to_dict()["updated_at"]:
+        abort(409, description="This caption changed in another session. Refresh before saving.")
+    provenance = payload.get("translation_provenance")
+    if provenance is not None:
+        if not isinstance(provenance, dict) or provenance.get("provider") not in {"hy-mt2-kobold", "nllb-ct2"}:
+            abort(400, description="Invalid translation provenance.")
+        model = provenance.get("model")
+        if model is not None and (not isinstance(model, str) or len(model) > 255):
+            abort(400, description="Invalid translation model identity.")
+        segment.translation_provider = provenance["provider"]
+        segment.translation_model = model
+        segment.translation_method = "passage_retranslation"
+        segment.translation_confidence_warning = str(provenance.get("warning") or "")[:255] or None
+        changed = True
     if "translated_text" in payload:
         value = str(payload["translated_text"])
         changed = changed or value != segment.translated_text
@@ -242,6 +294,7 @@ def update_segment(segment_id):
 @api_bp.post("/projects/<project_id>/export/srt")
 def export_srt(project_id):
     project = _project_or_404(project_id)
+    _require_idle(project)
     if project.translation_needs_reprocessing:
         return jsonify({"error": "Reprocess the project before exporting updated subtitles"}), 400
     try:
@@ -261,6 +314,7 @@ def download_srt(project_id):
 @api_bp.post("/projects/<project_id>/render")
 def render_project(project_id):
     project = _project_or_404(project_id)
+    _require_idle(project)
     if not project.source_video_path:
         return jsonify({"error": "Upload a video before rendering"}), 400
     if not project.segments:
@@ -273,11 +327,15 @@ def render_project(project_id):
         return jsonify({"error": str(exc), "diagnostics": exc.report.to_dict(include_details=False)}), 503
     from .tasks import render_video_task
 
-    project.status = ProjectStatus.RENDERING
-    project.processing_stage = "queued_render"
-    project.error_message = None
-    db.session.commit()
-    task = render_video_task.delay(project.id)
+    _reserve_job(project, ProjectStatus.RENDERING, "queued_render")
+    try:
+        task = render_video_task.delay(project.id)
+    except Exception:
+        project.status = ProjectStatus.FAILED
+        project.processing_stage = "failed"
+        project.error_message = "Could not queue rendering. Check the local worker and retry."
+        db.session.commit()
+        return jsonify({"error": project.error_message}), 503
     return jsonify({"task_id": task.id, "project": project.to_dict()}), 202
 
 
@@ -316,6 +374,28 @@ def _project_or_404(project_id):
     if not project:
         abort(404, description="Project not found")
     return project
+
+
+def _require_idle(project):
+    if project.status in {ProjectStatus.PROCESSING, ProjectStatus.RENDERING}:
+        abort(409, description="Wait for the current job to finish before changing this project.")
+
+
+def _reserve_job(project, status, stage):
+    # Conditional update closes the gap between preflight and queueing when two
+    # browser tabs start a job for the same project at once.
+    changed = Project.query.filter(
+        Project.id == project.id,
+        Project.status.notin_([ProjectStatus.PROCESSING, ProjectStatus.RENDERING]),
+    ).update({
+        "status": status, "processing_stage": stage, "error_message": None,
+        "translation_completed_words": 0, "translation_total_words": 0,
+    }, synchronize_session=False)
+    if not changed:
+        db.session.rollback()
+        abort(409, description="A job is already running for this project.")
+    db.session.commit()
+    db.session.refresh(project)
 
 
 def _parse_time(value, field_name):

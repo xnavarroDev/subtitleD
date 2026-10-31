@@ -1,0 +1,74 @@
+# Local processing companion for an independently hosted frontend.
+# Start with: python local_connector.py start --origin https://your-frontend.example
+x-local-environment: &local-environment
+  DATABASE_URL: sqlite:////app/storage/connector.db
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  STORAGE_DIR: /app/storage
+  CONNECTOR_MODE: "true"
+  CONNECTOR_TOKEN: ${CONNECTOR_TOKEN:?Run the local_connector.py launcher first}
+  CORS_ORIGINS: ${CORS_ORIGINS:?Set the exact hosted frontend origin}
+  HY_MT_BASE_URL: ${HY_MT_BASE_URL:-http://host.docker.internal:5002/v1}
+  HY_MT_MODEL: ${HY_MT_MODEL:-Hy-MT2-7B}
+  HY_MT_API_KEY: ${HY_MT_API_KEY:-}
+  TRANSLATION_PROVIDER: hy-mt2
+  TRANSLATION_DEFAULT_PROVIDER: hy-mt2
+  WHISPER_DEVICE: cpu
+  WHISPER_COMPUTE_TYPE: int8
+  WHISPER_MODEL_SIZE: ${WHISPER_MODEL_SIZE:-small}
+  WHISPERX_DIARIZE: "false"
+  HF_TOKEN: ${HF_TOKEN:-}
+  HF_HOME: /app/storage/models/huggingface
+  TORCH_HOME: /app/storage/models/torch
+  XDG_CACHE_HOME: /app/storage/models/cache
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - connector-redis:/data
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    image: ${CONNECTOR_IMAGE:-subtitled-connector:local}
+    build: ./backend
+    command: python -m waitress --host=0.0.0.0 --port=5000 run:app
+    environment: *local-environment
+    ports:
+      - "127.0.0.1:${CONNECTOR_PORT:-5000}:5000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend/storage:/app/storage
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  worker:
+    image: ${CONNECTOR_IMAGE:-subtitled-connector:local}
+    command: celery -A celery_worker.celery_app worker --loglevel=info -P solo --concurrency=1
+    environment: *local-environment
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend/storage:/app/storage
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  connector-redis:

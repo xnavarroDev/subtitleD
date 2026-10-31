@@ -42,6 +42,8 @@ class Config:
 
     BASE_DIR = Path(__file__).resolve().parents[1]
     STORAGE_DIR = Path(os.getenv("STORAGE_DIR", BASE_DIR / "storage"))
+    CONNECTOR_MODE = _bool_env("CONNECTOR_MODE", False)
+    CONNECTOR_TOKEN = os.getenv("CONNECTOR_TOKEN", "")
 
     SQLALCHEMY_DATABASE_URI = _database_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False

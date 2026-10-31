@@ -22,14 +22,9 @@ PROJECT_TRANSLATION_PROVIDERS = (
         "label": "Local NLLB",
         "supports_generation_settings": False,
     },
-    {
-        "id": "libretranslate",
-        "label": "LibreTranslate",
-        "supports_generation_settings": False,
-    },
 )
 
-_PROJECT_PROVIDER_IDS = {provider["id"] for provider in PROJECT_TRANSLATION_PROVIDERS}
+_PROJECT_PROVIDER_IDS = {provider["id"] for provider in PROJECT_TRANSLATION_PROVIDERS} | {"libretranslate"}  # Read existing projects; no longer offered as a backup.
 _PROVIDER_ALIASES = {
     "hy-mt": "hy-mt2-kobold",
     "hy-mt2": "hy-mt2-kobold",
@@ -389,11 +384,8 @@ def _provider_by_name(provider, settings=None):
     if provider in {"libretranslate", "libre_translate", "libre-translate"}:
         return LibreTranslateProvider()
     if provider in {"nllb", "nllb-ct2", "local", "local-nllb"}:
-        from .local_translation import FallbackTranslationProvider, LocalNllbTranslationProvider
-        return FallbackTranslationProvider(
-            LocalNllbTranslationProvider(),
-            LibreTranslateProvider(),
-        )
+        from .local_translation import LocalNllbTranslationProvider
+        return LocalNllbTranslationProvider()
     if provider in {"hy-mt", "hy-mt2", "hy-mt2-kobold", "kobold-hy-mt2"}:
         from .hy_mt import HyMtKoboldTranslationProvider
         from .local_translation import FallbackTranslationProvider, LocalNllbTranslationProvider
@@ -413,10 +405,7 @@ def _provider_by_name(provider, settings=None):
             retries=_setting("HY_MT_RETRIES", 1),
             glossary=settings.get("glossary"),
         )
-        local_fallback = FallbackTranslationProvider(
-            LocalNllbTranslationProvider(), LibreTranslateProvider()
-        )
-        return FallbackTranslationProvider(hy_mt, local_fallback)
+        return FallbackTranslationProvider(hy_mt, LocalNllbTranslationProvider())
     raise ValueError(
         "Unknown TRANSLATION_PROVIDER. Use 'routed', 'mock', 'libretranslate', "
         "'nllb-ct2', or 'hy-mt2'."

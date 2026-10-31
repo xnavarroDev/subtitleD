@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
@@ -11,12 +11,14 @@ import {
   uploadProjectVideo
 } from "../api";
 import StatusPill from "../components/StatusPill";
+import { DeviceSessionContext } from "../components/DeviceConnection";
 import { targetLanguagesFor } from "../translationLanguages";
 import "./ProjectCreationPage.css";
 
 const LANGUAGE_LOAD_ERROR = "Could not load the selected translation provider's languages.";
 
 export default function ProjectCreationPage() {
+  const { connected, openSetup } = useContext(DeviceSessionContext);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [projects, setProjects] = useState([]);
@@ -46,6 +48,7 @@ export default function ProjectCreationPage() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (!connected) return;
     listProjects().then(setProjects).catch(() => setProjects([]));
     getTranslationSettings()
       .then((settings) => {
@@ -63,10 +66,10 @@ export default function ProjectCreationPage() {
         });
       })
       .catch(() => undefined);
-  }, []);
+  }, [connected]);
 
   useEffect(() => {
-    if (!translationProvider) {
+    if (!connected || !translationProvider) {
       return undefined;
     }
     let active = true;
@@ -98,7 +101,7 @@ export default function ProjectCreationPage() {
     return () => {
       active = false;
     };
-  }, [translationProvider]);
+  }, [connected, translationProvider]);
 
   useEffect(() => {
     if (languagesLoading || !languages.length) {
@@ -116,6 +119,7 @@ export default function ProjectCreationPage() {
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (!connected) { openSetup(); return; }
     if (!videoFile) {
       setError("Choose a video file first.");
       return;
@@ -207,6 +211,8 @@ export default function ProjectCreationPage() {
         ) : null}
       </header>
 
+      {!connected ? <div className="notice device-browse-notice"><span>Explore your workspace. Connect your device to load projects, add videos, and process subtitles locally.</span><button type="button" onClick={openSetup}>Connect device</button></div> : null}
+
       {showCreateForm ? (
         <section className="create-project-shell">
           <form className="panel project-form" onSubmit={handleSubmit}>
@@ -228,7 +234,7 @@ export default function ProjectCreationPage() {
               />
               <span className="upload-icon" aria-hidden="true">↑</span>
               <strong>{videoFile ? videoFile.name : "Choose a video to subtitle"}</strong>
-              <small>{videoFile ? "Ready to upload" : "MP4, MOV, WebM, or MKV"}</small>
+              <small>{!connected ? "Connect your device to add a video" : videoFile ? "Ready to upload" : "MP4, MOV, WebM, or MKV"}</small>
             </label>
 
             <label>
@@ -315,7 +321,7 @@ export default function ProjectCreationPage() {
 
             <div className="create-actions">
               {projects.length ? <button type="button" onClick={closeCreateForm}>Cancel</button> : null}
-              <button className="primary-action" disabled={submitting || languagesLoading || !languages.length || !title.trim() || !videoFile || !sourceLanguageAvailable || !targetLanguageAvailable}>
+              <button className="primary-action" disabled={!connected || submitting || languagesLoading || !languages.length || !title.trim() || !videoFile || !sourceLanguageAvailable || !targetLanguageAvailable}>
                 {submitting ? "Uploading..." : "Create project"}
               </button>
             </div>
@@ -331,9 +337,13 @@ export default function ProjectCreationPage() {
               <article className="project-card" key={project.id}>
                 <Link className="project-card-link" to={`/projects/${project.id}`}>
                   <div className="project-thumbnail">
+
+                    {/** Want to change the thumbnnail for each of the projects, is done here */}
+
                     <span className="thumbnail-language">{(project.source_language || "--").toUpperCase()}</span>
                     <span className="thumbnail-arrow">→</span>
                     <span className="thumbnail-language target">{(project.target_language || "--").toUpperCase()}</span>
+
                     {project.status === "processing" || project.status === "rendering" ? <span className="processing-ring" /> : <span className="play-mark">▶</span>}
                   </div>
                   <div className="project-card-body">

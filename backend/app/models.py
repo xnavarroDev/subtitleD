@@ -8,6 +8,7 @@ class ProjectStatus:
     CREATED = "created"
     UPLOADED = "uploaded"
     PROCESSING = "processing"
+    TRANSCRIBED = "transcribed"
     PROCESSED = "processed"
     RENDERING = "rendering"
     RENDERED = "rendered"
@@ -84,6 +85,7 @@ class Project(db.Model):
             "glossary": self.glossary or "",
             "translation_provider": self.translation_provider or "hy-mt2-kobold",
             "translation_needs_reprocessing": bool(self.translation_needs_reprocessing),
+            "has_transcript": bool(self.transcript_words),
             "translation_settings": {
                 "temperature": self.translation_temperature,
                 "top_p": self.translation_top_p,
@@ -141,6 +143,7 @@ class SubtitleSegment(db.Model):
     translation_unit_id = db.Column(db.String(64), nullable=True)
     translation_confidence_warning = db.Column(db.String(255), nullable=True)
     segment_index = db.Column(db.Integer, nullable=False)
+    merge_parts = db.Column(db.JSON, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -165,6 +168,7 @@ class SubtitleSegment(db.Model):
             "translation_unit_id": self.translation_unit_id,
             "translation_confidence_warning": self.translation_confidence_warning,
             "segment_index": self.segment_index,
+            "merge_parts": self.merge_parts,
             "created_at": _iso(self.created_at),
             "updated_at": _iso(self.updated_at),
         }

@@ -14,6 +14,7 @@ from .providers.translation import (
     default_project_translation_provider,
     normalize_language as normalize_translation_language,
 )
+from .providers.transcription import TranscriptWord
 from .utils.captions import flatten_transcript_words
 from .utils.caption_translation import iter_deterministic_translation
 from .utils.source_reconstruction import reconstruct_source_words
@@ -29,14 +30,14 @@ class _IdentityTranslationProvider:
 
 
 @celery_app.task(name="process_video_task")
-def process_video_task(project_id):
+def process_video_task(project_id, mode="process"):
     """Transcribe raw words, then translate and segment them with sliding context."""
     project = Project.query.get(project_id)
     if not project:
         return {"error": "Project not found"}
 
     try:
-        require_job_preflight("process", project, include_worker=False)
+        require_job_preflight(mode, project, include_worker=False)
         _set_processing(project, "extracting_audio")
 
         if not project.source_video_path:
@@ -72,11 +73,15 @@ def process_video_task(project_id):
 
         project.translation_total_words = len(words)
         project.translation_completed_words = 0
-        project.processing_stage = "segmenting_and_translating"
+        project.processing_stage = "segmenting" if mode == "transcribe" else "segmenting_and_translating"
         db.session.commit()
 
         reconstruction = _reconstruct_words(project, words)
-        prepared, warnings = _translate_words(project, reconstruction.words)
+        prepared, warnings = _translate_words(project, reconstruction.words, transcript_only=mode == "transcribe")
+        if mode == "transcribe":
+            from dataclasses import replace
+
+            prepared = [replace(caption, translated_text="", translation_provider="transcript") for caption in prepared]
         warnings = [
             *transcription_warnings,
             *([reconstruction.warning] if reconstruction.warning else []),
@@ -98,10 +103,10 @@ def process_video_task(project_id):
         _add_segments(project, prepared)
         project.srt_path = None
         project.output_video_path = None
-        project.status = ProjectStatus.PROCESSED
-        project.processing_stage = "complete"
-        project.translation_needs_reprocessing = False
-        project.translation_completed_words = len(words)
+        project.status = ProjectStatus.TRANSCRIBED if mode == "transcribe" else ProjectStatus.PROCESSED
+        project.processing_stage = "transcribed" if mode == "transcribe" else "complete"
+        project.translation_needs_reprocessing = mode == "transcribe"
+        project.translation_completed_words = 0 if mode == "transcribe" else len(words)
         project.processing_warning = _warning_text(warnings)
         db.session.commit()
         _delete_artifacts(artifact_paths)
@@ -111,7 +116,46 @@ def process_video_task(project_id):
         raise
 
 
-def _translate_words(project, words):
+@celery_app.task(name="translate_project_task")
+def translate_project_task(project_id):
+    """Translate saved aligned words without loading WhisperX or extracting audio."""
+    project = db.session.get(Project, project_id)
+    if not project:
+        return {"error": "Project not found"}
+    try:
+        require_job_preflight("translate", project, include_worker=False)
+        words = [TranscriptWord(
+            word.raw_text, word.start_time, word.end_time, word.speaker_label,
+            word.confidence, word.timing_quality,
+        ) for word in project.transcript_words]
+        if not words:
+            raise ValueError("Transcribe the video before translating")
+        previous_warning = project.processing_warning
+        _set_processing(project, "segmenting_and_translating")
+        project.translation_total_words = len(words)
+        reconstruction = _reconstruct_words(project, words)
+        prepared, warnings = _translate_words(project, reconstruction.words)
+        artifact_paths = [project.srt_path, project.output_video_path]
+        SubtitleSegment.query.filter_by(project_id=project.id).delete(synchronize_session=False)
+        _add_segments(project, prepared)
+        project.srt_path = None
+        project.output_video_path = None
+        project.status = ProjectStatus.PROCESSED
+        project.processing_stage = "complete"
+        project.translation_needs_reprocessing = False
+        project.processing_warning = _warning_text([
+            *([previous_warning] if previous_warning else []),
+            *([reconstruction.warning] if reconstruction.warning else []), *warnings,
+        ])
+        db.session.commit()
+        _delete_artifacts(artifact_paths)
+        return {"project_id": project.id, "status": project.status}
+    except Exception as exc:
+        _mark_failed(project_id, exc, preserve_existing=True)
+        raise
+
+
+def _translate_words(project, words, transcript_only=False):
     effective_source_language = (
         project.detected_source_language
         if normalize_translation_language(project.source_language) == "auto"
@@ -124,7 +168,7 @@ def _translate_words(project, words):
     )
     translator = (
         _IdentityTranslationProvider()
-        if same_language
+        if same_language or transcript_only
         else get_translation_provider(
             _project_translation_settings(project),
             provider_name=(
@@ -132,7 +176,7 @@ def _translate_words(project, words):
             ),
         )
     )
-    if not same_language and hasattr(translator, "check_ready"):
+    if not (same_language or transcript_only) and hasattr(translator, "check_ready"):
         readiness = translator.check_ready(
             effective_source_language, project.target_language
         )
@@ -269,7 +313,14 @@ def _mark_failed(project_id, exc, preserve_existing=False):
     db.session.rollback()
     project = Project.query.get(project_id)
     if project:
-        project.status = ProjectStatus.PROCESSED if preserve_existing and project.segments else ProjectStatus.FAILED
+        if preserve_existing and project.segments:
+            project.status = (
+                ProjectStatus.TRANSCRIBED
+                if all(segment.translation_provider == "transcript" for segment in project.segments)
+                else ProjectStatus.PROCESSED
+            )
+        else:
+            project.status = ProjectStatus.FAILED
         project.processing_stage = "failed"
         project.error_message = str(exc)[:1000]
         db.session.commit()

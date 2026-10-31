@@ -1,4 +1,9 @@
 .env
+.env.connector
+frontend/.env.local
+frontend/public/downloads/
+subtitled-setup.json
+backend/storage/launcher-frontend.log
 __pycache__/
 *.py[cod]
 .pytest_cache/

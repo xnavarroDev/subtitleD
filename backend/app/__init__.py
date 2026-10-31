@@ -29,10 +29,19 @@ def create_app(config_object=Config):
 
     CORS(app, origins=app.config["CORS_ORIGINS"], supports_credentials=False)
 
+    from .connector import init_connector
+
+    init_connector(app)
+
     from .routes import api_bp
 
     app.register_blueprint(api_bp)
+    from .caption_editing import caption_edit_bp
+    app.register_blueprint(caption_edit_bp)
     register_diagnostics_cli(app)
+    from .setup_cli import register_setup_cli
+
+    register_setup_cli(app)
     register_local_translation_cli(app)
 
     @app.get("/health")
@@ -92,6 +101,7 @@ def _upgrade_dev_schema():
             "smooth_speaker_fragments": "BOOLEAN DEFAULT FALSE",
         },
         "subtitle_segments": {
+            "merge_parts": "JSON",
             "speaker_label": "VARCHAR(64)",
             "transcription_confidence": "FLOAT",
             "translation_method": "VARCHAR(32) DEFAULT 'deterministic_timing'",

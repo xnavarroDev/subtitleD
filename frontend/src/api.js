@@ -62,11 +62,87 @@
  * fallback keeps local Vite runs convenient when the backend is started outside
  * Docker.
  */
-export const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api"
+const CONNECTION_KEY = "subtitled.connection";
+const ADDRESS_KEY = "subtitled.connectorAddress";
+export let API_BASE = (
+  localStorage.getItem(ADDRESS_KEY) || import.meta.env?.VITE_API_BASE_URL || "http://localhost:5000/api"
 ).replace(/\/$/, "");
+let pairingCode = "";
+let mediaToken = null;
 
-const API_ORIGIN = API_BASE.replace(/\/api$/, "");
+export function savedConnection() {
+  try {
+    return JSON.parse(sessionStorage.getItem(CONNECTION_KEY)) || { address: API_BASE, code: "" };
+  } catch {
+    return { address: API_BASE, code: "" };
+  }
+}
+
+export function forgetConnection() {
+  pairingCode = "";
+  mediaToken = null;
+  sessionStorage.removeItem(CONNECTION_KEY);
+}
+
+export async function connectDevice(address, code) {
+  const url = connectorUrl(address);
+  forgetConnection();
+  API_BASE = `${url.origin}/api`;
+  pairingCode = code.trim();
+  try {
+    const session = await apiRequest("/connector/session", { method: "POST", timeout: 10000 });
+    if (session.protocol_version !== 1 || !session.capabilities?.includes("transcribe")
+        || !session.capabilities?.includes("translate")) {
+      throw new Error("Update your local connector to a compatible SubtitleD version.");
+    }
+    if (!session.protected && !['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)) {
+      throw new Error("Start the protected local connector with local_connector.py before connecting this website.");
+    }
+    mediaToken = session.media_token;
+    localStorage.setItem(ADDRESS_KEY, API_BASE);
+    sessionStorage.setItem(CONNECTION_KEY, JSON.stringify({ address: API_BASE, code: pairingCode }));
+    return session;
+  } catch (error) {
+    forgetConnection();
+    throw error;
+  }
+}
+
+function connectorUrl(address) {
+  const url = new URL(address);
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+      || !['http:', 'https:'].includes(url.protocol) || url.username || url.password
+      || url.search || url.hash || !['', '/', '/api', '/api/'].includes(url.pathname)) {
+    throw new Error("Use a local connector address such as http://localhost:5000/api.");
+  }
+  return url;
+}
+
+export async function pairWithCompanion(address, ticket) {
+  const url = connectorUrl(address);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(`${url.origin}/api/connector/pair`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticket }), credentials: "omit", cache: "no-store", signal: controller.signal,
+    });
+    const payload = await response.json();
+    if (!response.ok || typeof payload.code !== "string") throw new Error(payload.error || "Open SubtitleD from the companion to connect again.");
+    await connectDevice(address, payload.code);
+    return payload.code;
+  } catch (error) {
+    throw new Error(error.name === "AbortError" || error instanceof TypeError
+      ? "Cannot reach the companion. Start it and allow local device access in your browser."
+      : error.message);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function getDiagnostics() {
+  return apiRequest("/diagnostics", { allowUnavailable: true, timeout: 45000 });
+}
 
 export const DEFAULT_TRANSLATION_PROVIDERS = [
   {
@@ -77,11 +153,6 @@ export const DEFAULT_TRANSLATION_PROVIDERS = [
   {
     id: "nllb-ct2",
     label: "Local NLLB",
-    supports_generation_settings: false
-  },
-  {
-    id: "libretranslate",
-    label: "LibreTranslate",
     supports_generation_settings: false
   }
 ];
@@ -94,28 +165,35 @@ export const DEFAULT_TRANSLATION_PROVIDERS = [
  * Content-Type.
  */
 async function apiRequest(path, options = {}) {
-  const headers = new Headers(options.headers);
-  if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
+  const { timeout = 30000, allowUnavailable = false, ...requestOptions } = options;
+  const headers = new Headers(requestOptions.headers);
+  if (pairingCode) headers.set("Authorization", `Bearer ${pairingCode}`);
+  if (requestOptions.body && !(requestOptions.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers
-  });
-
-  if (!response.ok) {
-    let message = `Request failed with ${response.status}`;
-    try {
-      const payload = await response.json();
-      message = payload.error || message;
-    } catch {
-      // Keep the generic message when the response is not JSON.
-    }
-    throw new Error(message);
+  const controller = new AbortController();
+  const timer = timeout ? setTimeout(() => controller.abort(), timeout) : null;
+  let response;
+  let payload;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...requestOptions, headers, signal: controller.signal, credentials: "omit", cache: "no-store"
+    });
+    payload = response.status === 204 ? null : await response.json();
+  } catch (error) {
+    throw new Error(error.name === "AbortError"
+      ? "The local connector took too long to respond. Check that it is running."
+      : "Cannot reach the local connector. Start it, allow local device access in your browser, and check the trusted website address.");
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
-  return response.json();
+  if (!response.ok && !(allowUnavailable && response.status === 503 && payload?.checks)) {
+    throw new Error(payload?.error || `Request failed with ${response.status}`);
+  }
+
+  return payload;
 }
 
 /** Convert backend-relative media/download paths into browser-ready URLs. */
@@ -123,7 +201,9 @@ export function absoluteFileUrl(path) {
   if (!path) {
     return null;
   }
-  return path.startsWith("http") ? path : `${API_ORIGIN}${path}`;
+  const url = new URL(path, API_BASE.replace(/\/api$/, ""));
+  if (mediaToken && url.origin === new URL(API_BASE).origin) url.searchParams.set("media_token", mediaToken);
+  return url.toString();
 }
 
 /** Create the database project record before uploading the media file. */
@@ -141,19 +221,7 @@ export function listProjects() {
 
 /** Permanently delete a project and its generated artifacts. */
 export async function deleteProject(projectId) {
-  const response = await fetch(`${API_BASE}/projects/${projectId}`, {
-    method: "DELETE"
-  });
-  if (!response.ok) {
-    let message = `Request failed with ${response.status}`;
-    try {
-      const payload = await response.json();
-      message = payload.error || message;
-    } catch {
-      // Keep the generic message when the response is not JSON.
-    }
-    throw new Error(message);
-  }
+  return apiRequest(`/projects/${projectId}`, { method: "DELETE" });
 }
 
 /** Return languages currently available from the configured translation provider. */
@@ -186,7 +254,8 @@ export function uploadProjectVideo(projectId, file) {
   form.append("video", file);
   return apiRequest(`/projects/${projectId}/video`, {
     method: "POST",
-    body: form
+    body: form,
+    timeout: 0
   });
 }
 
@@ -195,6 +264,14 @@ export function processProject(projectId) {
   return apiRequest(`/projects/${projectId}/process`, {
     method: "POST"
   });
+}
+
+export function transcribeProject(projectId) {
+  return apiRequest(`/projects/${projectId}/transcribe`, { method: "POST" });
+}
+
+export function translateProject(projectId) {
+  return apiRequest(`/projects/${projectId}/translate`, { method: "POST" });
 }
 
 /** Queue the Celery FFmpeg render workflow. */
@@ -227,4 +304,16 @@ export function updateSegment(segmentId, payload) {
     method: "PATCH",
     body: JSON.stringify(payload)
   });
+}
+
+export function mergeSegments(projectId, segmentIds, revisions) {
+  return apiRequest(`/projects/${projectId}/segments/merge`, { method: "POST", body: JSON.stringify({ segment_ids: segmentIds, revisions }) });
+}
+
+export function splitSegment(segmentId, parts, revision) {
+  return apiRequest(`/segments/${segmentId}/split`, { method: "POST", body: JSON.stringify({ parts, revision }) });
+}
+
+export function translateSegment(segmentId) {
+  return apiRequest(`/segments/${segmentId}/translate`, { method: "POST", timeout: 180000 });
 }

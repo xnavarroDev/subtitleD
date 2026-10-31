@@ -124,23 +124,31 @@ def run_job_preflight(job_type, project, include_worker=True):
     if include_worker:
         checks.append(check_worker())
 
-    source_path = getattr(project, "source_video_path", None)
-    checks.append(check_project_file(source_path, "source_video"))
+    if job_type != "translate":
+        source_path = getattr(project, "source_video_path", None)
+        checks.append(check_project_file(source_path, "source_video"))
 
-    if job_type == "process":
+    if job_type in {"process", "transcribe"}:
         checks.extend([
             check_ffmpeg(require_subtitles=False),
             check_transcription_provider(
                 deep=False, diarize=bool(getattr(project, "detect_speakers", False))
             ),
         ])
+    if job_type in {"process", "translate"}:
         from .providers.translation import normalize_language
 
-        source = normalize_language(getattr(project, "source_language", None))
+        if job_type == "translate" and not getattr(project, "transcript_words", None):
+            checks.append(DiagnosticCheck("transcript", FAIL, "Transcribe the video before translating."))
+
+        source = normalize_language(
+            getattr(project, "detected_source_language", None)
+            or getattr(project, "source_language", None)
+        )
         target = normalize_language(getattr(project, "target_language", None))
         if source == "auto" or source != target:
             checks.append(check_translation_provider(
-                source_language=getattr(project, "source_language", None),
+                source_language=source,
                 target_language=getattr(project, "target_language", None),
                 provider_name=getattr(project, "translation_provider", None),
             ))
@@ -151,7 +159,7 @@ def run_job_preflight(job_type, project, include_worker=True):
                 check_project_segments(project),
             ]
         )
-    else:
+    elif job_type not in {"process", "transcribe", "translate"}:
         checks.append(
             DiagnosticCheck(
                 name="job",
